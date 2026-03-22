@@ -1,0 +1,26 @@
+<!-- ios/Runner/Info.plist  — add these keys inside the top-level <dict> -->
+
+<key>NSPhotoLibraryUsageDescription</key>
+<string>DashCam Player needs access to your photo library to open video files.</string>
+
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>DashCam Player saves exported videos to your photo library.</string>
+
+<key>UISupportsDocumentBrowser</key>
+<true/>
+
+<!-- Allow landscape orientations in addition to portrait -->
+<key>UISupportedInterfaceOrientations</key>
+<array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+</array>
+
+<key>UISupportedInterfaceOrientations~ipad</key>
+<array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+</array>

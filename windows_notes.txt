@@ -1,0 +1,12 @@
+# windows/runner/CMakeLists.txt — no changes needed for file access on Windows.
+# Flutter's file_picker uses the Win32 common dialog which works without manifests.
+
+# However, add this to your app's Package.appxmanifest if distributing via MSIX:
+#
+# <Capabilities>
+#   <rescap:Capability Name="broadFileSystemAccess"/>
+# </Capabilities>
+#
+# And set the broadFileSystemAccess capability in the MSIX manifest builder.
+#
+# For development builds (flutter run -d windows), no manifest changes are needed.
