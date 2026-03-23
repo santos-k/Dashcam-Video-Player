@@ -27,7 +27,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void initState() {
     super.initState();
     WakelockPlus.enable();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+      // Auto-advance when a clip finishes
+      ref.read(playbackProvider.notifier).onClipEnd = _onClipEnd;
+    });
   }
 
   @override
@@ -63,6 +67,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     ref.read(playbackProvider.notifier).loadPair(pairs[index], 0, autoPlay: autoPlay);
+  }
+
+  void _onClipEnd() {
+    final pairs = ref.read(videoPairListProvider);
+    final index = ref.read(currentIndexProvider);
+    final next  = index + 1;
+    if (next < pairs.length) {
+      _goTo(next, autoPlay: true);
+    }
+    // If last clip, just stop — do nothing
   }
 
   Future<void> _pickFolder() async {
@@ -111,7 +125,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state   = 0;
-    await ref.read(playbackProvider.notifier).loadPair(pairs.first, 0, autoPlay: false);
+    final notifier = ref.read(playbackProvider.notifier);
+    notifier.onClipEnd = _onClipEnd; // ensure it's always set
+    await notifier.loadPair(pairs.first, 0, autoPlay: false);
     _focusNode.requestFocus();
   }
 

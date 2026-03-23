@@ -1,6 +1,7 @@
 // lib/providers/app_providers.dart
 
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import '../models/video_pair.dart';
@@ -95,6 +96,9 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   Player get frontPlayer => _frontPlayer;
   Player get backPlayer  => _backPlayer;
 
+  /// Called by the UI when a clip ends — advances to next pair.
+  VoidCallback? onClipEnd;
+
   Future<void> loadPair(VideoPair pair, int syncOffsetMs,
       {bool autoPlay = false}) async {
     // Stop both first
@@ -141,6 +145,19 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         if (pair.hasBack)  _backPlayer.play(),
       ]);
     }
+
+    // Listen for end-of-file on the primary player
+    _listenForEnd(pair);
+  }
+
+  void _listenForEnd(pair) {
+    // Use front player if available, otherwise back
+    final primary = pair.hasFront ? _frontPlayer : _backPlayer;
+    primary.stream.completed.listen((completed) {
+      if (completed && onClipEnd != null) {
+        onClipEnd!();
+      }
+    });
   }
 
   Future<void> play() async {
