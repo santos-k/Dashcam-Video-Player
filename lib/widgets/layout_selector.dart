@@ -5,14 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/layout_config.dart';
 import '../providers/app_providers.dart';
 
-/// Shows a bottom sheet with layout mode, PIP primary, and PIP corner choices.
 void showLayoutSelector(BuildContext context) {
   showModalBottomSheet(
-    context:           context,
-    backgroundColor:   const Color(0xFF1E1E1E),
+    context:         context,
+    backgroundColor: const Color(0xFF1E1E1E),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
+    isScrollControlled: true,
     builder: (_) => const _LayoutSheet(),
   );
 }
@@ -22,158 +22,241 @@ class _LayoutSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final config = ref.watch(layoutConfigProvider);
+    final config   = ref.watch(layoutConfigProvider);
     final notifier = ref.read(layoutConfigProvider.notifier);
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 36, height: 4,
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
-              ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // Drag handle
+        Center(
+          child: Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 18),
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
+        ),
 
-          // ── Layout mode ────────────────────────────────
-          const _SectionLabel('Layout'),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _LayoutChip(
-                label:    'Side by side',
-                icon:     Icons.view_column_rounded,
-                selected: config.mode == LayoutMode.sideBySide,
-                onTap:    () => notifier.state =
-                    config.copyWith(mode: LayoutMode.sideBySide),
-              ),
-              const SizedBox(width: 8),
-              _LayoutChip(
-                label:    'Stacked',
-                icon:     Icons.view_stream_rounded,
-                selected: config.mode == LayoutMode.stacked,
-                onTap:    () => notifier.state =
-                    config.copyWith(mode: LayoutMode.stacked),
-              ),
-              const SizedBox(width: 8),
-              _LayoutChip(
-                label:    'PIP',
-                icon:     Icons.picture_in_picture_alt_rounded,
-                selected: config.mode == LayoutMode.pip,
-                onTap:    () => notifier.state =
-                    config.copyWith(mode: LayoutMode.pip),
-              ),
-            ],
+        // ── Layout mode ────────────────────────────────
+        const _Label('Layout'),
+        const SizedBox(height: 10),
+        Row(children: [
+          _Chip(
+            icon: Icons.view_column_rounded, label: 'Side by side',
+            selected: config.mode == LayoutMode.sideBySide,
+            onTap: () => notifier.state =
+                config.copyWith(mode: LayoutMode.sideBySide),
           ),
-
-          // ── PIP options (only visible in PIP mode) ─────
-          AnimatedSize(
-            duration: const Duration(milliseconds: 200),
-            child: config.mode == LayoutMode.pip
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 20),
-                      const _SectionLabel('Primary video'),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          _LayoutChip(
-                            label: 'Front',
-                            icon: Icons.camera_front_rounded,
-                            selected: config.pipPrimary == PipPrimary.front,
-                            onTap: () => notifier.state =
-                                config.copyWith(pipPrimary: PipPrimary.front),
-                          ),
-                          const SizedBox(width: 8),
-                          _LayoutChip(
-                            label: 'Back',
-                            icon: Icons.camera_rear_rounded,
-                            selected: config.pipPrimary == PipPrimary.back,
-                            onTap: () => notifier.state =
-                                config.copyWith(pipPrimary: PipPrimary.back),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      const _SectionLabel('PIP corner'),
-                      const SizedBox(height: 10),
-                      _PipCornerPicker(
-                        selected: config.pipCorner,
-                        onSelect: (c) => notifier.state =
-                            config.copyWith(pipCorner: c),
-                      ),
-                    ],
-                  )
-                : const SizedBox.shrink(),
+          const SizedBox(width: 8),
+          _Chip(
+            icon: Icons.view_stream_rounded, label: 'Stacked',
+            selected: config.mode == LayoutMode.stacked,
+            onTap: () => notifier.state =
+                config.copyWith(mode: LayoutMode.stacked),
           ),
+          const SizedBox(width: 8),
+          _Chip(
+            icon: Icons.picture_in_picture_alt_rounded, label: 'PIP',
+            selected: config.mode == LayoutMode.pip,
+            onTap: () => notifier.state =
+                config.copyWith(mode: LayoutMode.pip),
+          ),
+        ]),
 
-          const SizedBox(height: 20),
-        ],
-      ),
+        // ── PIP options ────────────────────────────────
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          child: config.mode != LayoutMode.pip
+              ? const SizedBox.shrink()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 20),
+
+                    // Primary video
+                    const _Label('Primary video (large)'),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      _Chip(
+                        icon: Icons.camera_front_rounded, label: 'Front',
+                        selected: config.pipPrimary == PipPrimary.front,
+                        onTap: () => notifier.state =
+                            config.copyWith(pipPrimary: PipPrimary.front),
+                      ),
+                      const SizedBox(width: 8),
+                      _Chip(
+                        icon: Icons.camera_rear_rounded, label: 'Back',
+                        selected: config.pipPrimary == PipPrimary.back,
+                        onTap: () => notifier.state =
+                            config.copyWith(pipPrimary: PipPrimary.back),
+                      ),
+                    ]),
+
+                    const SizedBox(height: 20),
+                    const _Label('Default PIP position'),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'You can also drag the PIP window freely. '
+                      'This snaps it to a grid position.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // 3×3 position grid
+                    _PositionGrid(
+                      hAlign: config.pipHAlign,
+                      vAlign: config.pipVAlign,
+                      onSelect: (h, v) {
+                        notifier.state = config.copyWith(
+                          pipHAlign: h, pipVAlign: v);
+                        // Reset drag position so it snaps to new grid cell
+                        _resetPipOffset(ref);
+                      },
+                    ),
+
+                    const SizedBox(height: 20),
+                    const _Label('Horizontal position'),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      _Chip(
+                        icon: Icons.align_horizontal_left_rounded,
+                        label: 'Left',
+                        selected: config.pipHAlign == PipHAlign.left,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipHAlign: PipHAlign.left);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _Chip(
+                        icon: Icons.align_horizontal_center_rounded,
+                        label: 'Center',
+                        selected: config.pipHAlign == PipHAlign.center,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipHAlign: PipHAlign.center);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _Chip(
+                        icon: Icons.align_horizontal_right_rounded,
+                        label: 'Right',
+                        selected: config.pipHAlign == PipHAlign.right,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipHAlign: PipHAlign.right);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                    ]),
+
+                    const SizedBox(height: 16),
+                    const _Label('Vertical position'),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      _Chip(
+                        icon: Icons.vertical_align_top_rounded,
+                        label: 'Top',
+                        selected: config.pipVAlign == PipVAlign.top,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipVAlign: PipVAlign.top);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _Chip(
+                        icon: Icons.vertical_align_center_rounded,
+                        label: 'Center',
+                        selected: config.pipVAlign == PipVAlign.center,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipVAlign: PipVAlign.center);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _Chip(
+                        icon: Icons.vertical_align_bottom_rounded,
+                        label: 'Bottom',
+                        selected: config.pipVAlign == PipVAlign.bottom,
+                        onTap: () {
+                          notifier.state = config.copyWith(pipVAlign: PipVAlign.bottom);
+                          _resetPipOffset(ref);
+                        },
+                      ),
+                    ]),
+                  ],
+                ),
+        ),
+      ]),
     );
+  }
+
+  void _resetPipOffset(WidgetRef ref) {
+    // Notify DualVideoView to recalculate position from alignment
+    ref.read(pipResetProvider.notifier).state++;
   }
 }
 
-// ─── PIP corner 2×2 grid picker ──────────────────────────────────────────────
 
-class _PipCornerPicker extends StatelessWidget {
-  final PipCorner selected;
-  final ValueChanged<PipCorner> onSelect;
+// ─── 3×3 grid picker ─────────────────────────────────────────────────────────
 
-  const _PipCornerPicker({required this.selected, required this.onSelect});
+class _PositionGrid extends StatelessWidget {
+  final PipHAlign hAlign;
+  final PipVAlign vAlign;
+  final void Function(PipHAlign, PipVAlign) onSelect;
+
+  const _PositionGrid({
+    required this.hAlign,
+    required this.vAlign,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hAligns = [PipHAlign.left, PipHAlign.center, PipHAlign.right];
+    final vAligns = [PipVAlign.top, PipVAlign.center, PipVAlign.bottom];
+
     return Container(
-      width:  140,
-      height: 90,
+      width:   150,
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         border:       Border.all(color: Colors.white12),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: GridView.count(
-        crossAxisCount: 2,
-        physics:        const NeverScrollableScrollPhysics(),
-        children: [
-          _cornerDot(PipCorner.topLeft,     Alignment.topLeft),
-          _cornerDot(PipCorner.topRight,    Alignment.topRight),
-          _cornerDot(PipCorner.bottomLeft,  Alignment.bottomLeft),
-          _cornerDot(PipCorner.bottomRight, Alignment.bottomRight),
-        ],
-      ),
-    );
-  }
-
-  Widget _cornerDot(PipCorner corner, Alignment alignment) {
-    final isSel = selected == corner;
-    return GestureDetector(
-      onTap: () => onSelect(corner),
-      child: Container(
-        color: Colors.transparent,
-        child: Align(
-          alignment: alignment,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Container(
-              width:  16,
-              height: 16,
-              decoration: BoxDecoration(
-                color:        isSel
-                    ? const Color(0xFF4FC3F7)
-                    : Colors.white24,
-                borderRadius: BorderRadius.circular(3),
+      child: Column(
+        children: vAligns.map((v) => Row(
+          children: hAligns.map((h) {
+            final selected = hAlign == h && vAlign == v;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onSelect(h, v),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  height: 36,
+                  margin: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xFF4FC3F7)
+                        : Colors.white10,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF4FC3F7)
+                          : Colors.white12,
+                    ),
+                  ),
+                  child: selected
+                      ? const Icon(Icons.picture_in_picture_alt_rounded,
+                          color: Colors.black, size: 14)
+                      : null,
+                ),
               ),
-            ),
-          ),
-        ),
+            );
+          }).toList(),
+        )).toList(),
       ),
     );
   }
@@ -181,35 +264,27 @@ class _PipCornerPicker extends StatelessWidget {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-class _SectionLabel extends StatelessWidget {
+class _Label extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  const _Label(this.text);
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color:      Colors.white54,
-        fontSize:   12,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 0.8,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Text(text,
+    style: const TextStyle(
+      color: Colors.white54, fontSize: 11,
+      fontWeight: FontWeight.w600, letterSpacing: 0.8,
+    ));
 }
 
-class _LayoutChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
+class _Chip extends StatelessWidget {
+  final IconData   icon;
+  final String     label;
+  final bool       selected;
   final VoidCallback onTap;
 
-  const _LayoutChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
+  const _Chip({
+    required this.icon, required this.label,
+    required this.selected, required this.onTap,
   });
 
   @override
@@ -217,7 +292,7 @@ class _LayoutChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+        duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color:  selected
@@ -229,19 +304,17 @@ class _LayoutChip extends StatelessWidget {
           ),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Row(
-          children: [
-            Icon(icon, color: selected ? const Color(0xFF4FC3F7) : Colors.white54, size: 18),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color:    selected ? Colors.white : Colors.white54,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+            color: selected ? const Color(0xFF4FC3F7) : Colors.white54,
+            size: 16),
+          const SizedBox(width: 6),
+          Text(label,
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.white54,
+              fontSize: 13,
+            )),
+        ]),
       ),
     );
   }
