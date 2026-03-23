@@ -2,39 +2,65 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../models/layout_config.dart';
 import '../providers/app_providers.dart';
 
-class DualVideoView extends ConsumerWidget {
+class DualVideoView extends ConsumerStatefulWidget {
   const DualVideoView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DualVideoView> createState() => _DualVideoViewState();
+}
+
+class _DualVideoViewState extends ConsumerState<DualVideoView> {
+  late VideoController _frontController;
+  late VideoController _backController;
+
+  @override
+  void initState() {
+    super.initState();
+    final notifier      = ref.read(playbackProvider.notifier);
+    _frontController    = VideoController(notifier.frontPlayer);
+    _backController     = VideoController(notifier.backPlayer);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final playback = ref.watch(playbackProvider);
     final layout   = ref.watch(layoutConfigProvider);
 
-    if (!playback.isLoaded ||
-        playback.frontController == null ||
-        playback.backController  == null) {
+    if (!playback.isLoaded) return const SizedBox.shrink();
+
+    // Single video
+    if (playback.hasFront && !playback.hasBack) {
+      return _VideoPane(controller: _frontController, label: 'FRONT');
+    }
+    if (playback.hasBack && !playback.hasFront) {
+      return _VideoPane(controller: _backController, label: 'BACK');
+    }
+    if (!playback.hasFront && !playback.hasBack) {
       return const Center(
-        child: Text('No video loaded', style: TextStyle(color: Colors.white54)),
+        child: Text('No video', style: TextStyle(color: Colors.white38)),
       );
     }
 
-    final front = _VideoPane(
-      controller: playback.frontController!,
-      label: 'FRONT',
-    );
-    final back = _VideoPane(
-      controller: playback.backController!,
-      label: 'BACK',
-    );
+    // Dual video
+    final front = _VideoPane(controller: _frontController, label: 'FRONT');
+    final back  = _VideoPane(controller: _backController,  label: 'BACK');
 
     return switch (layout.mode) {
-      LayoutMode.sideBySide => _SideBySide(front: front, back: back),
-      LayoutMode.stacked    => _Stacked(front: front, back: back),
-      LayoutMode.pip        => _PipView(
+      LayoutMode.sideBySide => Row(children: [
+          Expanded(child: front),
+          const SizedBox(width: 2),
+          Expanded(child: back),
+        ]),
+      LayoutMode.stacked => Column(children: [
+          Expanded(child: front),
+          const SizedBox(height: 2),
+          Expanded(child: back),
+        ]),
+      LayoutMode.pip => _PipView(
           front:   front,
           back:    back,
           primary: layout.pipPrimary,
@@ -44,166 +70,100 @@ class DualVideoView extends ConsumerWidget {
   }
 }
 
-// ─── Side by side ───────────────────────────────────────────────────────────
-
-class _SideBySide extends StatelessWidget {
-  final Widget front;
-  final Widget back;
-  const _SideBySide({required this.front, required this.back});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: front),
-        const SizedBox(width: 2),
-        Expanded(child: back),
-      ],
-    );
-  }
-}
-
-// ─── Stacked ─────────────────────────────────────────────────────────────────
-
-class _Stacked extends StatelessWidget {
-  final Widget front;
-  final Widget back;
-  const _Stacked({required this.front, required this.back});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(child: front),
-        const SizedBox(height: 2),
-        Expanded(child: back),
-      ],
-    );
-  }
-}
-
-// ─── PIP ─────────────────────────────────────────────────────────────────────
+// ─── PIP layout ──────────────────────────────────────────────────────────────
 
 class _PipView extends StatelessWidget {
   final Widget front;
   final Widget back;
   final PipPrimary primary;
   final PipCorner  corner;
-
   const _PipView({
-    required this.front,
-    required this.back,
-    required this.primary,
-    required this.corner,
+    required this.front, required this.back,
+    required this.primary, required this.corner,
   });
 
   @override
   Widget build(BuildContext context) {
-    final mainVideo = primary == PipPrimary.front ? front : back;
-    final pipVideo  = primary == PipPrimary.front ? back  : front;
+    final main     = primary == PipPrimary.front ? front : back;
+    final pip      = primary == PipPrimary.front ? back  : front;
+    final pipLabel = primary == PipPrimary.front ? 'BACK' : 'FRONT';
 
-    return Stack(
-      children: [
-        Positioned.fill(child: mainVideo),
-        Positioned(
-          top:    _top(corner),
-          bottom: _bottom(corner),
-          left:   _left(corner),
-          right:  _right(corner),
-          child: SizedBox(
-            width:  180,
-            height: 110,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Stack(
-                children: [
-                  pipVideo,
-                  // Drag handle hint
-                  Positioned(
-                    bottom: 4,
-                    right:  4,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        primary == PipPrimary.front ? 'BACK' : 'FRONT',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
+    return Stack(children: [
+      Positioned.fill(child: main),
+      Positioned(
+        top:    _top(corner), bottom: _bottom(corner),
+        left:   _left(corner), right:  _right(corner),
+        child: SizedBox(
+          width: 180, height: 110,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Stack(children: [
+              pip,
+              Positioned(
+                bottom: 4, right: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
                   ),
-                ],
+                  child: Text(pipLabel,
+                    style: const TextStyle(
+                      color: Colors.white70, fontSize: 9,
+                      fontWeight: FontWeight.w600, letterSpacing: 0.5,
+                    )),
+                ),
               ),
-            ),
+            ]),
           ),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 
   double? _top(PipCorner c) =>
-      (c == PipCorner.topLeft || c == PipCorner.topRight) ? 16 : null;
+      (c == PipCorner.topLeft    || c == PipCorner.topRight)    ? 16 : null;
   double? _bottom(PipCorner c) =>
       (c == PipCorner.bottomLeft || c == PipCorner.bottomRight) ? 16 : null;
   double? _left(PipCorner c) =>
-      (c == PipCorner.topLeft || c == PipCorner.bottomLeft) ? 16 : null;
+      (c == PipCorner.topLeft    || c == PipCorner.bottomLeft)  ? 16 : null;
   double? _right(PipCorner c) =>
-      (c == PipCorner.topRight || c == PipCorner.bottomRight) ? 16 : null;
+      (c == PipCorner.topRight   || c == PipCorner.bottomRight) ? 16 : null;
 }
 
-// ─── Individual video pane ────────────────────────────────────────────────────
+// ─── Single video pane ────────────────────────────────────────────────────────
 
 class _VideoPane extends StatelessWidget {
-  final VideoPlayerController controller;
+  final VideoController controller;
   final String label;
-
   const _VideoPane({required this.controller, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // Black background for letterboxing
-        Container(color: Colors.black),
-        Center(
-          child: AspectRatio(
-            aspectRatio: controller.value.isInitialized
-                ? controller.value.aspectRatio
-                : 16 / 9,
-            child: VideoPlayer(controller),
-          ),
+    return Stack(children: [
+      Container(color: Colors.black),
+      Center(
+        child: Video(
+          controller:    controller,
+          controls:      NoVideoControls, // we have our own controls
+          fit:           BoxFit.contain,
         ),
-        // Camera label badge
-        Positioned(
-          top:  8,
-          left: 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-              ),
-            ),
+      ),
+      Positioned(
+        top: 8, left: 8,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(4),
           ),
+          child: Text(label,
+            style: const TextStyle(
+              color: Colors.white, fontSize: 11,
+              fontWeight: FontWeight.w700, letterSpacing: 1.2,
+            )),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 }

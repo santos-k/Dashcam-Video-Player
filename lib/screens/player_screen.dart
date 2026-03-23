@@ -29,7 +29,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void initState() {
     super.initState();
     WakelockPlus.enable();
-    // Force landscape in player
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -44,54 +43,91 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     super.dispose();
   }
 
-  // ─── Folder picking ──────────────────────────────────────────────────────
-
   Future<void> _pickFolder() async {
     final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select dashcam folder',
+      dialogTitle: 'Select dashcam drive or folder (e.g. F:\\)',
     );
     if (result == null) return;
 
     final dir = Directory(result);
-    await ref.read(videoPairListProvider.notifier).loadFromDirectory(dir);
+
+    // Show loading indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Scanning for dashcam videos...'),
+            ],
+          ),
+          duration: Duration(seconds: 30),
+        ),
+      );
+    }
+
+    await ref.read(videoPairListProvider.notifier).loadFromRoot(dir);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
 
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No paired F/B video files found in that folder.'),
+          SnackBar(
+            content: Text(
+              'No dashcam videos found in $result\n'
+              'Expected folders: video_front, video_back, video_front_lock, video_back_lock',
+            ),
+            duration: const Duration(seconds: 5),
           ),
         );
       }
       return;
     }
 
+    final paired   = pairs.where((p) => p.isPaired).length;
+    final frontOnly = pairs.where((p) => p.hasFront && !p.hasBack).length;
+    final backOnly  = pairs.where((p) => p.hasBack  && !p.hasFront).length;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Found ${pairs.length} clips  '
+            '($paired paired, $frontOnly front-only, $backOnly back-only)',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state   = 0;
-    await ref
-        .read(playbackProvider.notifier)
-        .loadPair(pairs.first, 0);
+    await ref.read(playbackProvider.notifier).loadPair(pairs.first, 0);
   }
-
-  // ─── Export ──────────────────────────────────────────────────────────────
 
   Future<void> _export() async {
     final pair = ref.read(currentPairProvider);
     if (pair == null) return;
 
-    final layout    = ref.read(layoutConfigProvider);
+    final layout     = ref.read(layoutConfigProvider);
     final syncOffset = ref.read(syncOffsetProvider);
 
     ref.read(exportProgressProvider.notifier).state = 0.0;
 
     final outPath = await ExportService.exportPair(
-      pair:          pair,
-      layout:        layout,
-      syncOffsetMs:  syncOffset,
-      onProgress: (p) {
-        ref.read(exportProgressProvider.notifier).state = p;
-      },
+      pair:         pair,
+      layout:       layout,
+      syncOffsetMs: syncOffset,
+      onProgress:   (p) =>
+          ref.read(exportProgressProvider.notifier).state = p,
     );
 
     ref.read(exportProgressProvider.notifier).state = null;
@@ -99,7 +135,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (outPath == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Export failed. Check logs.')),
+          const SnackBar(content: Text('Export failed.')),
         );
       }
       return;
@@ -110,13 +146,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final pairs          = ref.watch(videoPairListProvider);
     final exportProgress = ref.watch(exportProgressProvider);
-    final isPortrait     = MediaQuery.of(context).orientation == Orientation.portrait;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -125,52 +158,52 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         onTap: () => setState(() => _overlayVisible = !_overlayVisible),
         child: Column(
           children: [
-            // ── Top app bar ─────────────────────────────────
             AnimatedSlide(
-              offset: _overlayVisible ? Offset.zero : const Offset(0, -1),
+              offset:   _overlayVisible ? Offset.zero : const Offset(0, -1),
               duration: const Duration(milliseconds: 200),
               child: _TopBar(
-                clipCount:  pairs.length,
-                onFolder:   _pickFolder,
-                onLayout:   () => showLayoutSelector(context),
-                onExport:   pairs.isNotEmpty ? _export : null,
+                clipCount: pairs.length,
+                onFolder:  _pickFolder,
+                onLayout:  () => showLayoutSelector(context),
+                onExport:  pairs.isNotEmpty ? _export : null,
               ),
             ),
 
-            // ── Video area ──────────────────────────────────
             Expanded(
               child: Stack(
                 children: [
                   const DualVideoView(),
 
-                  // Export progress overlay
                   if (exportProgress != null)
                     _ExportOverlay(progress: exportProgress),
 
-                  // Empty state
                   if (pairs.isEmpty)
                     Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.video_library_outlined,
-                              color: Colors.white24, size: 64),
+                          const Icon(Icons.videocam_outlined,
+                              color: Colors.white24, size: 72),
                           const SizedBox(height: 16),
                           const Text(
-                            'Open a dashcam folder to begin',
-                            style: TextStyle(
-                              color: Colors.white38,
-                              fontSize: 16,
-                            ),
+                            'Select your dashcam SD card or folder',
+                            style: TextStyle(color: Colors.white54, fontSize: 16),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'e.g. F:\\  (containing video_front & video_back folders)',
+                            style: TextStyle(color: Colors.white24, fontSize: 13),
+                          ),
+                          const SizedBox(height: 28),
                           ElevatedButton.icon(
                             onPressed: _pickFolder,
                             icon:  const Icon(Icons.folder_open_rounded),
-                            label: const Text('Open folder'),
+                            label: const Text('Open Drive / Folder'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF4FC3F7),
                               foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 14),
                             ),
                           ),
                         ],
@@ -180,9 +213,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ),
             ),
 
-            // ── Controls ────────────────────────────────────
             AnimatedSlide(
-              offset: _overlayVisible ? Offset.zero : const Offset(0, 1),
+              offset:   _overlayVisible ? Offset.zero : const Offset(0, 1),
               duration: const Duration(milliseconds: 200),
               child: const PlaybackControls(),
             ),
@@ -192,8 +224,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
   }
 }
-
-// ─── Top App Bar ─────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
   final int clipCount;
@@ -213,31 +243,24 @@ class _TopBar extends StatelessWidget {
     return Container(
       color: const Color(0xCC000000),
       padding: EdgeInsets.only(
-        top:  MediaQuery.of(context).padding.top + 4,
+        top: MediaQuery.of(context).padding.top + 4,
         left: 4, right: 4, bottom: 4,
       ),
       child: Row(
         children: [
-          // Clip list drawer
           Builder(
             builder: (ctx) => IconButton(
-              icon: const Icon(Icons.menu_rounded, color: Colors.white70),
+              icon:    const Icon(Icons.menu_rounded, color: Colors.white70),
               onPressed: () => Scaffold.of(ctx).openDrawer(),
               tooltip: 'Clip list',
             ),
           ),
-
-          // App name
           const Text(
             'DashCam Player',
             style: TextStyle(
-              color:      Colors.white,
-              fontSize:   16,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
+              color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600,
             ),
           ),
-
           if (clipCount > 0)
             Padding(
               padding: const EdgeInsets.only(left: 8),
@@ -249,31 +272,21 @@ class _TopBar extends StatelessWidget {
                 ),
                 child: Text(
                   '$clipCount clips',
-                  style: const TextStyle(
-                    color:    Color(0xFF4FC3F7),
-                    fontSize: 11,
-                  ),
+                  style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11),
                 ),
               ),
             ),
-
           const Spacer(),
-
-          // Layout picker
           IconButton(
             icon:    const Icon(Icons.view_quilt_rounded, color: Colors.white70),
             onPressed: onLayout,
             tooltip: 'Layout',
           ),
-
-          // Open folder
           IconButton(
             icon:    const Icon(Icons.folder_open_rounded, color: Colors.white70),
             onPressed: onFolder,
-            tooltip: 'Open folder',
+            tooltip: 'Open drive/folder',
           ),
-
-          // Export
           IconButton(
             icon: Icon(
               Icons.ios_share_rounded,
@@ -287,8 +300,6 @@ class _TopBar extends StatelessWidget {
     );
   }
 }
-
-// ─── Export progress overlay ──────────────────────────────────────────────────
 
 class _ExportOverlay extends StatelessWidget {
   final double progress;

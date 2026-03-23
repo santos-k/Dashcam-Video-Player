@@ -2,7 +2,7 @@
 
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
 import '../utils/file_pairer.dart';
@@ -14,13 +14,8 @@ import '../utils/file_pairer.dart';
 class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
   VideoPairListNotifier() : super([]);
 
-  Future<void> loadFromDirectory(Directory dir) async {
-    final pairs = await FilePairer.pairFiles(dir);
-    state = pairs;
-  }
-
-  Future<void> loadFromTwoDirectories(Directory frontDir, Directory backDir) async {
-    final pairs = await FilePairer.pairFromTwoDirectories(frontDir, backDir);
+  Future<void> loadFromRoot(Directory root) async {
+    final pairs = await FilePairer.pairFromRoot(root);
     state = pairs;
   }
 
@@ -49,125 +44,119 @@ final currentPairProvider = Provider<VideoPair?>((ref) {
 // 3. Layout configuration
 // ─────────────────────────────────────────
 
-final layoutConfigProvider = StateProvider<LayoutConfig>((ref) => const LayoutConfig());
+final layoutConfigProvider =
+    StateProvider<LayoutConfig>((ref) => const LayoutConfig());
 
 // ─────────────────────────────────────────
-// 4. Sync offset (milliseconds, front relative to back)
-//    Positive → front is ahead; seek back forward to compensate
-//    Negative → back is ahead; seek front forward to compensate
+// 4. Sync offset (milliseconds)
 // ─────────────────────────────────────────
 
-final syncOffsetProvider = StateProvider<int>((ref) => 0); // ms
+final syncOffsetProvider = StateProvider<int>((ref) => 0);
 
 // ─────────────────────────────────────────
-// 5. Playback controller pair
+// 5. Playback — two media_kit Players
 // ─────────────────────────────────────────
 
 class PlaybackNotifier extends StateNotifier<PlaybackState> {
-  PlaybackNotifier() : super(PlaybackState.initial());
+  PlaybackNotifier()
+      : super(PlaybackState.initial()) {
+    _frontPlayer = Player();
+    _backPlayer  = Player();
+  }
 
-  VideoPlayerController? _frontCtrl;
-  VideoPlayerController? _backCtrl;
+  late final Player _frontPlayer;
+  late final Player _backPlayer;
+
+  Player get frontPlayer => _frontPlayer;
+  Player get backPlayer  => _backPlayer;
 
   Future<void> loadPair(VideoPair pair, int syncOffsetMs) async {
-    await _disposeControllers();
+    await Future.wait([
+      _frontPlayer.stop(),
+      _backPlayer.stop(),
+    ]);
 
-    final front = VideoPlayerController.file(pair.frontFile);
-    final back  = VideoPlayerController.file(pair.backFile);
+    final offset = syncOffsetMs != 0 ? syncOffsetMs : pair.syncOffsetMs;
 
-    await Future.wait([front.initialize(), back.initialize()]);
-
-    // Apply initial sync offset
-    if (syncOffsetMs > 0) {
-      await back.seekTo(Duration(milliseconds: syncOffsetMs));
-    } else if (syncOffsetMs < 0) {
-      await front.seekTo(Duration(milliseconds: -syncOffsetMs));
+    if (pair.hasFront) {
+      await _frontPlayer.open(
+        Media(pair.frontFile!.path),
+        play: false,
+      );
+    }
+    if (pair.hasBack) {
+      await _backPlayer.open(
+        Media(pair.backFile!.path),
+        play: false,
+      );
     }
 
-    _frontCtrl = front;
-    _backCtrl  = back;
+    // Apply sync offset
+    if (offset > 0 && pair.hasBack) {
+      await _backPlayer.seek(Duration(milliseconds: offset));
+    } else if (offset < 0 && pair.hasFront) {
+      await _frontPlayer.seek(Duration(milliseconds: -offset));
+    }
 
     state = PlaybackState(
-      frontController: front,
-      backController:  back,
-      isPlaying:       false,
-      isLoaded:        true,
+      isPlaying: false,
+      isLoaded:  true,
+      hasFront:  pair.hasFront,
+      hasBack:   pair.hasBack,
     );
   }
 
   Future<void> play() async {
     await Future.wait([
-      _frontCtrl?.play() ?? Future.value(),
-      _backCtrl?.play()  ?? Future.value(),
+      if (state.hasFront) _frontPlayer.play(),
+      if (state.hasBack)  _backPlayer.play(),
     ]);
     state = state.copyWith(isPlaying: true);
   }
 
   Future<void> pause() async {
     await Future.wait([
-      _frontCtrl?.pause() ?? Future.value(),
-      _backCtrl?.pause()  ?? Future.value(),
+      _frontPlayer.pause(),
+      _backPlayer.pause(),
     ]);
     state = state.copyWith(isPlaying: false);
   }
 
   Future<void> togglePlay() async {
-    if (state.isPlaying) {
-      await pause();
-    } else {
-      await play();
-    }
+    state.isPlaying ? await pause() : await play();
   }
 
   Future<void> seekTo(Duration position) async {
     await Future.wait([
-      _frontCtrl?.seekTo(position) ?? Future.value(),
-      _backCtrl?.seekTo(position)  ?? Future.value(),
+      if (state.hasFront) _frontPlayer.seek(position),
+      if (state.hasBack)  _backPlayer.seek(position),
     ]);
   }
 
-  /// Re-apply sync offset without reloading the pair.
   Future<void> applySyncOffset(int offsetMs) async {
-    if (_frontCtrl == null || _backCtrl == null) return;
-
-    final basePosition = _frontCtrl!.value.position;
-    final wasPlaying   = state.isPlaying;
-
+    final wasPlaying = state.isPlaying;
     if (wasPlaying) await pause();
 
-    // Reset both to the current front position, then offset back
-    await _frontCtrl!.seekTo(basePosition);
+    final base = _frontPlayer.state.position;
 
-    if (offsetMs > 0) {
-      final backSeek = basePosition + Duration(milliseconds: offsetMs);
-      await _backCtrl!.seekTo(backSeek);
-    } else if (offsetMs < 0) {
-      final frontSeek = basePosition + Duration(milliseconds: -offsetMs);
-      await _frontCtrl!.seekTo(frontSeek);
-      await _backCtrl!.seekTo(basePosition);
+    if (offsetMs > 0 && state.hasBack) {
+      await _frontPlayer.seek(base);
+      await _backPlayer.seek(base + Duration(milliseconds: offsetMs));
+    } else if (offsetMs < 0 && state.hasFront) {
+      await _frontPlayer.seek(base + Duration(milliseconds: -offsetMs));
+      await _backPlayer.seek(base);
     } else {
-      await _backCtrl!.seekTo(basePosition);
+      await _frontPlayer.seek(base);
+      await _backPlayer.seek(base);
     }
 
     if (wasPlaying) await play();
   }
 
-  Future<void> _disposeControllers() async {
-    final f = _frontCtrl;
-    final b = _backCtrl;
-    _frontCtrl = null;
-    _backCtrl  = null;
-    state = PlaybackState.initial();
-    await Future.wait([
-      f?.dispose() ?? Future.value(),
-      b?.dispose() ?? Future.value(),
-    ]);
-  }
-
   @override
   void dispose() {
-    _frontCtrl?.dispose();
-    _backCtrl?.dispose();
+    _frontPlayer.dispose();
+    _backPlayer.dispose();
     super.dispose();
   }
 }
@@ -178,45 +167,43 @@ final playbackProvider =
 );
 
 // ─────────────────────────────────────────
-// 6. Playback state value object
+// 6. Playback state
 // ─────────────────────────────────────────
 
 class PlaybackState {
-  final VideoPlayerController? frontController;
-  final VideoPlayerController? backController;
   final bool isPlaying;
   final bool isLoaded;
+  final bool hasFront;
+  final bool hasBack;
 
   const PlaybackState({
-    this.frontController,
-    this.backController,
     required this.isPlaying,
     required this.isLoaded,
+    this.hasFront = false,
+    this.hasBack  = false,
   });
 
   factory PlaybackState.initial() => const PlaybackState(
-        frontController: null,
-        backController:  null,
-        isPlaying:       false,
-        isLoaded:        false,
+        isPlaying: false,
+        isLoaded:  false,
       );
 
   PlaybackState copyWith({
-    VideoPlayerController? frontController,
-    VideoPlayerController? backController,
     bool? isPlaying,
     bool? isLoaded,
+    bool? hasFront,
+    bool? hasBack,
   }) =>
       PlaybackState(
-        frontController: frontController ?? this.frontController,
-        backController:  backController  ?? this.backController,
-        isPlaying:       isPlaying       ?? this.isPlaying,
-        isLoaded:        isLoaded        ?? this.isLoaded,
+        isPlaying: isPlaying ?? this.isPlaying,
+        isLoaded:  isLoaded  ?? this.isLoaded,
+        hasFront:  hasFront  ?? this.hasFront,
+        hasBack:   hasBack   ?? this.hasBack,
       );
 }
 
 // ─────────────────────────────────────────
-// 7. Export progress  (0.0 → 1.0, null = idle)
+// 7. Export progress
 // ─────────────────────────────────────────
 
 final exportProgressProvider = StateProvider<double?>((ref) => null);
