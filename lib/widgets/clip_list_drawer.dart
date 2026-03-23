@@ -14,11 +14,14 @@ class ClipListDrawer extends ConsumerWidget {
     final pairs   = ref.watch(videoPairListProvider);
     final current = ref.watch(currentIndexProvider);
 
+    final paired    = pairs.where((p) => p.isPaired).length;
+    final frontOnly = pairs.where((p) => p.hasFront && !p.hasBack).length;
+    final backOnly  = pairs.where((p) => p.hasBack  && !p.hasFront).length;
+
     return Drawer(
       backgroundColor: const Color(0xFF121212),
       child: Column(
         children: [
-          // Header
           Container(
             width:   double.infinity,
             padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
@@ -29,27 +32,28 @@ class ClipListDrawer extends ConsumerWidget {
                 const Text(
                   'CLIPS',
                   style: TextStyle(
-                    color:      Color(0xFF4FC3F7),
-                    fontSize:   11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
+                    color: Color(0xFF4FC3F7), fontSize: 11,
+                    fontWeight: FontWeight.w700, letterSpacing: 2,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
-                  '${pairs.length} paired set${pairs.length != 1 ? "s" : ""}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+                  '${pairs.length} total',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$paired paired  •  $frontOnly front-only  •  $backOnly back-only',
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
               ],
             ),
           ),
-
-          // Clip list
           Expanded(
             child: pairs.isEmpty
                 ? const Center(
                     child: Text(
-                      'No clips loaded.\nUse the folder icon to open a directory.',
+                      'No clips loaded.\nOpen your dashcam drive.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white38, fontSize: 13),
                     ),
@@ -57,11 +61,11 @@ class ClipListDrawer extends ConsumerWidget {
                 : ListView.builder(
                     itemCount: pairs.length,
                     itemBuilder: (ctx, i) => _ClipTile(
-                      pair:       pairs[i],
-                      index:      i,
-                      isCurrent:  i == current,
+                      pair:      pairs[i],
+                      index:     i,
+                      isCurrent: i == current,
                       onTap: () {
-                        Navigator.of(ctx).pop(); // close drawer
+                        Navigator.of(ctx).pop();
                         _loadClip(ref, i);
                       },
                     ),
@@ -81,9 +85,9 @@ class ClipListDrawer extends ConsumerWidget {
 }
 
 class _ClipTile extends StatelessWidget {
-  final VideoPair pair;
-  final int index;
-  final bool isCurrent;
+  final VideoPair  pair;
+  final int        index;
+  final bool       isCurrent;
   final VoidCallback onTap;
 
   const _ClipTile({
@@ -98,13 +102,14 @@ class _ClipTile extends StatelessWidget {
     final fmt = DateFormat('MMM d, yyyy  HH:mm:ss');
 
     return ListTile(
-      onTap:       onTap,
-      tileColor:   isCurrent ? const Color(0xFF4FC3F7).withOpacity(0.1) : null,
+      onTap:     onTap,
+      tileColor: isCurrent
+          ? const Color(0xFF4FC3F7).withOpacity(0.1)
+          : null,
       leading: Container(
-        width:  32,
-        height: 32,
+        width: 32, height: 32,
         decoration: BoxDecoration(
-          color:        isCurrent
+          color: isCurrent
               ? const Color(0xFF4FC3F7).withOpacity(0.2)
               : Colors.white10,
           borderRadius: BorderRadius.circular(4),
@@ -113,11 +118,8 @@ class _ClipTile extends StatelessWidget {
           child: Text(
             '${index + 1}',
             style: TextStyle(
-              color:      isCurrent
-                  ? const Color(0xFF4FC3F7)
-                  : Colors.white38,
-              fontSize:   12,
-              fontWeight: FontWeight.w600,
+              color: isCurrent ? const Color(0xFF4FC3F7) : Colors.white38,
+              fontSize: 12, fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -125,18 +127,52 @@ class _ClipTile extends StatelessWidget {
       title: Text(
         fmt.format(pair.timestamp),
         style: TextStyle(
-          color:    isCurrent ? Colors.white : Colors.white70,
+          color: isCurrent ? Colors.white : Colors.white70,
           fontSize: 13,
         ),
       ),
-      subtitle: Text(
-        pair.id,
-        style: const TextStyle(color: Colors.white38, fontSize: 11),
+      subtitle: Row(
+        children: [
+          // Paired / single indicator
+          if (pair.isPaired)
+            _Badge('F+B', const Color(0xFF4FC3F7))
+          else if (pair.hasFront)
+            _Badge('F only', Colors.orange)
+          else
+            _Badge('B only', Colors.purple),
+          // Lock indicator
+          if (pair.isLocked) ...[
+            const SizedBox(width: 4),
+            _Badge('🔒 locked', Colors.red.shade300),
+          ],
+        ],
       ),
       trailing: isCurrent
           ? const Icon(Icons.play_arrow_rounded,
               color: Color(0xFF4FC3F7), size: 18)
           : null,
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final String text;
+  final Color  color;
+  const _Badge(this.text, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color:        color.withOpacity(0.15),
+        border:       Border.all(color: color.withOpacity(0.4)),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }
