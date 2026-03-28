@@ -8,7 +8,6 @@ import '../providers/app_providers.dart';
 import '../models/layout_config.dart';
 import '../models/video_pair.dart';
 import '../services/export_service.dart';
-import '../widgets/map_dialog.dart';
 
 class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onPrevious;
@@ -17,6 +16,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onLayout;
   final VoidCallback? onSaveClip;
   final VoidCallback? onCloseFolder;
+  final VoidCallback? onMap;
   final VoidCallback? focusRequester;
 
   const PlaybackControls({
@@ -27,6 +27,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
     required this.onLayout,
     this.onSaveClip,
     this.onCloseFolder,
+    this.onMap,
     this.focusRequester,
   });
 
@@ -48,6 +49,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     final exportProg  = ref.watch(exportProgressProvider);
     final frontMuted  = ref.watch(frontMutedProvider);
     final backMuted   = ref.watch(backMutedProvider);
+    final isSaving    = ref.watch(savingClipsProvider);
     final notifier    = ref.read(playbackProvider.notifier);
 
     final hasPrev  = index > 0;
@@ -154,13 +156,14 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             const SizedBox(width: 4),
           ],
 
-          // Layout
-          _ToolBtn(
-            icon:    Icons.view_quilt_rounded,
-            label:   _layoutLabel(layout.mode),
-            tooltip: 'Change layout (L)',
-            onPressed: widget.onLayout,
-          ),
+          // Layout — only useful when both cameras are present
+          if (playback.hasFront && playback.hasBack)
+            _ToolBtn(
+              icon:    Icons.view_quilt_rounded,
+              label:   _layoutLabel(layout.mode),
+              tooltip: 'Change layout (L)',
+              onPressed: widget.onLayout,
+            ),
           const SizedBox(width: 4),
 
           // Open folder
@@ -178,10 +181,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             label:   'Map',
             tooltip: 'Show GPS location on map (M)',
             onPressed: () {
-              final pair = pairs.isNotEmpty ? pairs[index] : null;
-              final videoPath = pair?.frontPath ?? pair?.backPath;
-              showMapDialog(context, videoPath)
-                  .then((_) => widget.focusRequester?.call());
+              widget.onMap?.call();
             },
           ),
           const SizedBox(width: 4),
@@ -195,11 +195,9 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           const SizedBox(width: 4),
 
           // Save current clip
-          _ToolBtn(
-            icon:    Icons.save_alt_rounded,
-            label:   'Save',
-            tooltip: 'Save current clip files to a folder',
-            onPressed: () {
+          _SaveBtn(
+            isSaving: isSaving,
+            onPressed: isSaving ? null : () {
               widget.onSaveClip?.call();
             },
           ),
@@ -303,7 +301,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             }),
           _NavBtn(icon: Icons.skip_next_rounded,
             enabled: hasNext, tooltip: 'Next (Shift+.)',
-            onPressed: widget.onNext),
+            onPressed: () { widget.onNext(); widget.focusRequester?.call(); }),
 
           const Spacer(),
 
@@ -561,13 +559,15 @@ class _NavBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
-    child: IconButton(
-      icon: Icon(icon),
-      color: enabled ? Colors.white70 : Colors.white24,
-      onPressed: enabled ? onPressed : null,
-      iconSize: 24,
-      padding: const EdgeInsets.all(6),
-      constraints: const BoxConstraints(),
+    child: ExcludeFocus(
+      child: IconButton(
+        icon: Icon(icon),
+        color: enabled ? Colors.white70 : Colors.white24,
+        onPressed: enabled ? onPressed : null,
+        iconSize: 24,
+        padding: const EdgeInsets.all(6),
+        constraints: const BoxConstraints(),
+      ),
     ),
   );
 }
@@ -612,6 +612,62 @@ class _MuteBtn extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: muted ? Colors.redAccent : Colors.white54,
               )),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Save button with spinner ────────────────────────────────────────────────
+
+class _SaveBtn extends StatelessWidget {
+  final bool isSaving;
+  final VoidCallback? onPressed;
+  const _SaveBtn({required this.isSaving, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: isSaving ? 'Saving...' : 'Save clip files to a folder',
+      child: GestureDetector(
+        onTap: onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: isSaving
+                ? const Color(0xFF4FC3F7).withValues(alpha: 0.1)
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isSaving
+                  ? const Color(0xFF4FC3F7).withValues(alpha: 0.4)
+                  : Colors.white12,
+            ),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (isSaving)
+              const SizedBox(
+                width: 13, height: 13,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Color(0xFF4FC3F7),
+                ),
+              )
+            else
+              Icon(Icons.save_alt_rounded, size: 13,
+                  color: onPressed != null ? Colors.white54 : Colors.white24),
+            const SizedBox(width: 5),
+            Text(
+              isSaving ? 'Saving...' : 'Save',
+              style: TextStyle(
+                fontSize: 11,
+                color: isSaving
+                    ? const Color(0xFF4FC3F7)
+                    : onPressed != null ? Colors.white54 : Colors.white24,
+              ),
+            ),
           ]),
         ),
       ),

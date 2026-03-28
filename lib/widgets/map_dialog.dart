@@ -1,30 +1,29 @@
 // lib/widgets/map_dialog.dart
 //
-// Shows GPS coordinates for the current clip and lets the user open them
-// in the system browser on OpenStreetMap.  GPS is extracted from video
-// metadata automatically when ffprobe is available.
+// Shows GPS coordinates for the current clip in a sidebar (endDrawer) and
+// lets the user open them in the system browser on OpenStreetMap or Google Maps.
+// GPS is extracted from video metadata automatically when ffprobe is available.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/export_service.dart';
 
-Future<void> showMapDialog(BuildContext context, String? videoPath) {
-  return showDialog(
-    context: context,
-    builder: (_) => _MapDialog(videoPath: videoPath),
-  );
+/// Opens the map sidebar (endDrawer) for the given video path.
+void openMapSidebar(BuildContext context) {
+  Scaffold.of(context).openEndDrawer();
 }
 
-class _MapDialog extends StatefulWidget {
+class MapSidebar extends StatefulWidget {
   final String? videoPath;
-  const _MapDialog({this.videoPath});
+  final VoidCallback? onClose;
+  const MapSidebar({super.key, this.videoPath, this.onClose});
 
   @override
-  State<_MapDialog> createState() => _MapDialogState();
+  State<MapSidebar> createState() => _MapSidebarState();
 }
 
-class _MapDialogState extends State<_MapDialog> {
+class _MapSidebarState extends State<MapSidebar> {
   final _latCtrl = TextEditingController();
   final _lonCtrl = TextEditingController();
   bool _loading  = false;
@@ -34,6 +33,14 @@ class _MapDialogState extends State<_MapDialog> {
   void initState() {
     super.initState();
     if (widget.videoPath != null) _tryExtractGPS();
+  }
+
+  @override
+  void didUpdateWidget(MapSidebar old) {
+    super.didUpdateWidget(old);
+    if (widget.videoPath != old.videoPath && widget.videoPath != null) {
+      _tryExtractGPS();
+    }
   }
 
   @override
@@ -85,84 +92,138 @@ class _MapDialogState extends State<_MapDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor:  const Color(0xFF1E1E1E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Row(children: [
-        const Icon(Icons.map_rounded, color: Color(0xFF4FC3F7), size: 20),
-        const SizedBox(width: 8),
-        const Text('Map',
-          style: TextStyle(color: Colors.white70, fontSize: 16,
-              fontWeight: FontWeight.w600)),
-        const Spacer(),
-        if (widget.videoPath != null)
-          Tooltip(
-            message: 'Re-extract GPS from video',
-            child: IconButton(
-              icon: const Icon(Icons.refresh_rounded,
-                  color: Colors.white38, size: 18),
-              onPressed: _loading ? null : _tryExtractGPS,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ),
-      ]),
-      content: SizedBox(
-        width: 320,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                SizedBox(width: 16, height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Color(0xFF4FC3F7))),
-                SizedBox(width: 10),
-                Text('Extracting GPS…',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+    return Drawer(
+      backgroundColor: const Color(0xFF121212),
+      width: 320,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
+              color: const Color(0xFF1A1A1A),
+              child: Row(children: [
+                const Icon(Icons.map_rounded, color: Color(0xFF4FC3F7), size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('GPS / Map',
+                    style: TextStyle(color: Colors.white, fontSize: 15,
+                        fontWeight: FontWeight.w600)),
+                ),
+                if (widget.videoPath != null)
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded,
+                        color: Colors.white38, size: 18),
+                    onPressed: _loading ? null : _tryExtractGPS,
+                    tooltip: 'Re-extract GPS from video',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded,
+                      color: Colors.white38, size: 18),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    widget.onClose?.call();
+                  },
+                  tooltip: 'Close',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
               ]),
-            )
-          else ...[
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(_error!,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  textAlign: TextAlign.center),
-              ),
-            _CoordField(
-              label:      'Latitude',
-              hint:       'e.g. 51.5074',
-              controller: _latCtrl,
             ),
-            const SizedBox(height: 10),
-            _CoordField(
-              label:      'Longitude',
-              hint:       'e.g. -0.1278',
-              controller: _lonCtrl,
+
+            // Content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_loading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            SizedBox(width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Color(0xFF4FC3F7))),
+                            SizedBox(width: 10),
+                            Text('Extracting GPS...',
+                              style: TextStyle(color: Colors.white54, fontSize: 12)),
+                          ]),
+                        ),
+                      )
+                    else ...[
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Text(_error!,
+                            style: const TextStyle(color: Colors.white38, fontSize: 11),
+                            textAlign: TextAlign.center),
+                        ),
+
+                      const Text('Latitude',
+                        style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      const SizedBox(height: 4),
+                      _CoordField(
+                        hint: 'e.g. 51.5074',
+                        controller: _latCtrl,
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      const Text('Longitude',
+                        style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      const SizedBox(height: 4),
+                      _CoordField(
+                        hint: 'e.g. -0.1278',
+                        controller: _lonCtrl,
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Open map buttons
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _loading ? null : _openMap,
+                          icon: const Icon(Icons.public_rounded, size: 16),
+                          label: const Text('Open in OpenStreetMap'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4FC3F7),
+                            foregroundColor: Colors.black,
+                            disabledBackgroundColor: Colors.white12,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _loading ? null : _openGoogleMaps,
+                          icon: const Icon(Icons.map_outlined, size: 16),
+                          label: const Text('Open in Google Maps'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4FC3F7),
+                            foregroundColor: Colors.black,
+                            disabledBackgroundColor: Colors.white12,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ],
-        ]),
+        ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close',
-            style: TextStyle(color: Colors.white38)),
-        ),
-        _MapActionBtn(
-          icon:    Icons.public_rounded,
-          label:   'OpenStreetMap',
-          onTap:   _openMap,
-          enabled: !_loading,
-        ),
-        _MapActionBtn(
-          icon:    Icons.map_outlined,
-          label:   'Google Maps',
-          onTap:   _openGoogleMaps,
-          enabled: !_loading,
-        ),
-      ],
     );
   }
 }
@@ -170,11 +231,9 @@ class _MapDialogState extends State<_MapDialog> {
 // ─── Coordinate text field ────────────────────────────────────────────────────
 
 class _CoordField extends StatelessWidget {
-  final String label;
   final String hint;
   final TextEditingController controller;
   const _CoordField({
-    required this.label,
     required this.hint,
     required this.controller,
   });
@@ -190,9 +249,7 @@ class _CoordField extends StatelessWidget {
       ],
       style: const TextStyle(color: Colors.white70, fontSize: 13),
       decoration: InputDecoration(
-        labelText:    label,
         hintText:     hint,
-        labelStyle:   const TextStyle(color: Colors.white38, fontSize: 12),
         hintStyle:    const TextStyle(color: Colors.white24, fontSize: 12),
         enabledBorder: const OutlineInputBorder(
           borderSide: BorderSide(color: Colors.white24)),
@@ -203,30 +260,4 @@ class _CoordField extends StatelessWidget {
       ),
     );
   }
-}
-
-// ─── Map open button ──────────────────────────────────────────────────────────
-
-class _MapActionBtn extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final VoidCallback onTap;
-  final bool     enabled;
-  const _MapActionBtn({
-    required this.icon, required this.label,
-    required this.onTap, required this.enabled,
-  });
-
-  @override
-  Widget build(BuildContext context) => ElevatedButton.icon(
-    onPressed: enabled ? onTap : null,
-    icon:  Icon(icon, size: 14),
-    label: Text(label, style: const TextStyle(fontSize: 12)),
-    style: ElevatedButton.styleFrom(
-      backgroundColor:    const Color(0xFF4FC3F7),
-      foregroundColor:    Colors.black,
-      disabledBackgroundColor: Colors.white12,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    ),
-  );
 }

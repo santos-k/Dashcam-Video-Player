@@ -14,7 +14,7 @@ import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
-import '../widgets/map_dialog.dart';
+import '../widgets/map_dialog.dart' show MapSidebar;
 import '../services/log_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -28,7 +28,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _overlayVisible      = true;
   bool _isFullscreen        = false;
   bool _fullscreenTransiting = false;
-  final FocusNode _focusNode = FocusNode();
+  final FocusNode _focusNode    = FocusNode();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
@@ -63,10 +64,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.arrowLeft && playback.isLoaded) {
       appLog('Shortcut', 'Left arrow – seek -10s');
       notifier.seekRelative(const Duration(seconds: -10));
-    } else if (key == LogicalKeyboardKey.period && shift) {
+    } else if ((key == LogicalKeyboardKey.period && shift) ||
+               key == LogicalKeyboardKey.greater) {
       appLog('Shortcut', 'Shift+. – next clip');
       _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true);
-    } else if (key == LogicalKeyboardKey.comma && shift) {
+    } else if ((key == LogicalKeyboardKey.comma && shift) ||
+               key == LogicalKeyboardKey.less) {
       appLog('Shortcut', 'Shift+, – previous clip');
       _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true);
     } else if (key == LogicalKeyboardKey.keyF) {
@@ -90,17 +93,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ref.read(backMutedProvider.notifier).state = next;
         notifier.setBackMuted(next);
       } else {
-        // Paired or no video — show map
-        final pairs = ref.read(videoPairListProvider);
-        final index = ref.read(currentIndexProvider);
-        final pair  = pairs.isNotEmpty ? pairs[index] : null;
-        final videoPath = pair?.frontPath ?? pair?.backPath;
-        showMapDialog(context, videoPath).then((_) => _focusNode.requestFocus());
+        // Paired or no video — show map sidebar
+        appLog('Shortcut', 'M – open map sidebar');
+        _openMapSidebar();
       }
     } else if (key == LogicalKeyboardKey.keyO) {
       appLog('Shortcut', 'O – open folder');
       _pickFolder();
-    } else if (key == LogicalKeyboardKey.keyL) {
+    } else if (key == LogicalKeyboardKey.keyL &&
+               playback.hasFront && playback.hasBack) {
       appLog('Shortcut', 'L – layout selector');
       showLayoutSelector(context).then((_) => _focusNode.requestFocus());
     } else if (key == LogicalKeyboardKey.keyS) {
@@ -221,6 +222,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _focusNode.requestFocus();
   }
 
+  void _openMapSidebar() {
+    _scaffoldKey.currentState?.openEndDrawer();
+  }
+
   void _closeFolder() {
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) return;
@@ -263,6 +268,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
+    ref.read(savingClipsProvider.notifier).state = true;
+
     int copied = 0;
     int failed = 0;
 
@@ -282,35 +289,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    ref.read(savingClipsProvider.notifier).state = false;
     _focusNode.requestFocus();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(failed == 0
-            ? 'Saved $copied file${copied > 1 ? "s" : ""} to $outDir'
-            : 'Saved $copied file(s), $failed failed'),
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: 'Open folder',
-          onPressed: () => Process.run('explorer', [outDir]),
-        ),
-      ));
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final pairs = ref.watch(videoPairListProvider);
 
+    final currentPair = pairs.isNotEmpty
+        ? pairs[ref.watch(currentIndexProvider).clamp(0, pairs.length - 1)]
+        : null;
+    final mapVideoPath = currentPair?.frontPath ?? currentPair?.backPath;
+
     return KeyboardListener(
       focusNode: _focusNode,
       onKeyEvent: _handleKey,
       child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: Colors.black,
         drawer: ClipListDrawer(
           onSelect: (i) {
             _goTo(i, autoPlay: true);
-            // Focus is restored after the drawer closes via Navigator.pop
           },
+        ),
+        endDrawer: MapSidebar(
+          videoPath: mapVideoPath,
+          onClose: () => _focusNode.requestFocus(),
         ),
         body: Column(children: [
           _MinimalTopBar(
@@ -345,6 +350,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   .then((_) => _focusNode.requestFocus()),
               onSaveClip:     _saveClip,
               onCloseFolder:  _closeFolder,
+              onMap:          _openMapSidebar,
               focusRequester: _focusNode.requestFocus,
             ),
           ),
