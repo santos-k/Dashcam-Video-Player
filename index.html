@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DashCam Player — Dual Camera Video Player & Exporter</title>
   <meta name="description" content="A powerful desktop app to play, sync, and export paired front & back dashcam videos. Side-by-side, stacked, and PIP layouts with variable speed, GPS map, and FFmpeg export.">
+  <meta name="keywords" content="dashcam player, dual camera, video player, flutter, windows, pip, side by side, gps map, ffmpeg export">
+  <meta property="og:title" content="DashCam Player — Dual Camera Video Player">
+  <meta property="og:description" content="Play paired dashcam front & back videos with sync, variable speed, GPS map, and FFmpeg export.">
+  <meta property="og:image" content="assets/screenshots/side_by_side.png">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -47,7 +51,6 @@
       background:
         radial-gradient(ellipse 70% 50% at 50% 0%, rgba(79,195,247,0.06) 0%, transparent 100%),
         var(--bg);
-      position: relative;
     }
 
     .hero-badge {
@@ -130,27 +133,6 @@
       margin-top: 8px;
     }
 
-    /* ── Screenshot ────────────────────────────────────── */
-    .screenshot-wrap {
-      max-width: 960px;
-      margin: 48px auto 0;
-      padding: 0 24px;
-    }
-
-    .screenshot-wrap img {
-      width: 100%;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      box-shadow: 0 16px 60px rgba(0,0,0,0.5);
-    }
-
-    .screenshot-caption {
-      text-align: center;
-      color: var(--text-dim);
-      font-size: 0.82rem;
-      margin-top: 12px;
-    }
-
     /* ── Section ───────────────────────────────────────── */
     .section {
       max-width: 1100px;
@@ -185,6 +167,120 @@
       margin-right: auto;
     }
 
+    /* ── Showcase gallery ─────────────────────────────── */
+    .showcase-hero {
+      max-width: 1000px;
+      margin: 48px auto 0;
+      padding: 0 24px;
+    }
+
+    .showcase-hero img {
+      width: 100%;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: 0 16px 60px rgba(0,0,0,0.5);
+    }
+
+    .showcase-hero .caption {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.82rem;
+      margin-top: 12px;
+    }
+
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .showcase-item {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      transition: transform 0.25s, border-color 0.25s;
+      cursor: pointer;
+    }
+
+    .showcase-item:hover {
+      transform: translateY(-4px);
+      border-color: rgba(79,195,247,0.4);
+    }
+
+    .showcase-item img {
+      width: 100%;
+      display: block;
+    }
+
+    .showcase-item .overlay {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 16px;
+      background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    }
+
+    .showcase-item .overlay h4 {
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .showcase-item .overlay p {
+      font-size: 0.78rem;
+      color: var(--text-mid);
+      line-height: 1.4;
+    }
+
+    /* ── Lightbox ──────────────────────────────────────── */
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,0.92);
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 32px;
+    }
+
+    .lightbox.open { display: flex; }
+
+    .lightbox img {
+      max-width: 100%;
+      max-height: 90vh;
+      border-radius: 10px;
+      box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+
+    .lightbox .lb-close {
+      position: absolute;
+      top: 20px; right: 24px;
+      color: white;
+      font-size: 2rem;
+      cursor: pointer;
+      opacity: 0.6;
+      transition: opacity 0.2s;
+    }
+
+    .lightbox .lb-close:hover { opacity: 1; }
+
+    /* ── Stats ─────────────────────────────────────────── */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+      padding: 48px 24px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat { text-align: center; }
+    .stat-value { font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .stat-label { font-size: 0.82rem; color: var(--text-dim); margin-top: 2px; }
+
     /* ── Feature grid ─────────────────────────────────── */
     .features-grid {
       display: grid;
@@ -214,17 +310,8 @@
       font-size: 20px;
     }
 
-    .feature-card h3 {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    .feature-card p {
-      color: var(--text-mid);
-      font-size: 0.88rem;
-      line-height: 1.55;
-    }
+    .feature-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+    .feature-card p { color: var(--text-mid); font-size: 0.88rem; line-height: 1.55; }
 
     /* ── Shortcuts ─────────────────────────────────────── */
     .shortcuts-section {
@@ -250,10 +337,7 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .sc {
-      display: flex; align-items: center; gap: 10px;
-      padding: 5px 0;
-    }
+    .sc { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
 
     kbd {
       display: inline-block;
@@ -270,34 +354,7 @@
       white-space: nowrap;
     }
 
-    .sc-label {
-      color: var(--text-mid);
-      font-size: 0.84rem;
-    }
-
-    /* ── Stats ─────────────────────────────────────────── */
-    .stats {
-      display: flex;
-      justify-content: center;
-      gap: 48px;
-      flex-wrap: wrap;
-      padding: 48px 24px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .stat { text-align: center; }
-
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 800;
-      color: var(--accent);
-    }
-
-    .stat-label {
-      font-size: 0.82rem;
-      color: var(--text-dim);
-      margin-top: 2px;
-    }
+    .sc-label { color: var(--text-mid); font-size: 0.84rem; }
 
     /* ── Requirements ──────────────────────────────────── */
     .req-grid {
@@ -334,6 +391,7 @@
       .features-grid { grid-template-columns: repeat(2, 1fr); }
       .shortcuts-columns { grid-template-columns: repeat(2, 1fr); }
       .req-grid { grid-template-columns: repeat(2, 1fr); }
+      .showcase-grid { grid-template-columns: repeat(2, 1fr); }
       .stats { gap: 32px; }
     }
 
@@ -343,6 +401,7 @@
       .features-grid { grid-template-columns: 1fr; }
       .shortcuts-columns { grid-template-columns: 1fr; }
       .req-grid { grid-template-columns: 1fr; }
+      .showcase-grid { grid-template-columns: 1fr; }
       .hero-actions { flex-direction: column; align-items: center; }
       .btn { width: 100%; max-width: 280px; justify-content: center; }
       .stats { gap: 24px; }
@@ -361,11 +420,11 @@
 
     <h1>
       <span class="accent">DashCam</span> Player<br>
-      <span class="thin">Dual-Camera Video Player & Exporter</span>
+      <span class="thin">Dual-Camera Video Player &amp; Exporter</span>
     </h1>
 
     <p class="subtitle">
-      Play paired front & back dashcam videos side by side with synchronized controls,
+      Play paired front &amp; back dashcam videos side by side with synchronized controls,
       variable speed playback, GPS map, and FFmpeg-powered video export.
     </p>
 
@@ -377,37 +436,84 @@
         &#9733; Source on GitHub
       </a>
     </div>
-    <p class="meta">Free & open source &middot; Built with Flutter &middot; ~25 MB installer</p>
+    <p class="meta">Free &amp; open source &middot; Built with Flutter &middot; ~25 MB installer</p>
 
-    <div class="screenshot-wrap">
+    <!-- Hero screenshot -->
+    <div class="showcase-hero">
       <img src="assets/screenshots/side_by_side.png"
-           alt="DashCam Player showing dual front and back camera footage side by side">
-      <p class="screenshot-caption">Side-by-side view with synchronized dual-camera playback</p>
+           alt="DashCam Player — Side by side dual camera view"
+           onclick="openLightbox(this.src)">
+      <p class="caption">Side-by-side view &mdash; Front and back cameras playing in perfect sync</p>
     </div>
   </section>
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat">
-      <div class="stat-value">3</div>
-      <div class="stat-label">Layout Modes</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">11</div>
-      <div class="stat-label">Speed Levels</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">20+</div>
-      <div class="stat-label">Keyboard Shortcuts</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value">&plusmn;5s</div>
-      <div class="stat-label">Sync Offset Range</div>
-    </div>
+    <div class="stat"><div class="stat-value">3</div><div class="stat-label">Layout Modes</div></div>
+    <div class="stat"><div class="stat-value">11</div><div class="stat-label">Speed Levels</div></div>
+    <div class="stat"><div class="stat-value">20+</div><div class="stat-label">Keyboard Shortcuts</div></div>
+    <div class="stat"><div class="stat-value">&plusmn;5s</div><div class="stat-label">Sync Offset Range</div></div>
   </div>
 
-  <!-- Features -->
+  <!-- App Showcase -->
   <section class="section">
+    <p class="section-label">App Showcase</p>
+    <h2 class="section-title">See It in Action</h2>
+    <p class="section-subtitle">Every view and feature of DashCam Player, captured from real dashcam footage</p>
+
+    <div class="showcase-grid">
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/landing.png')">
+        <img src="assets/screenshots/landing.png" alt="Landing page with keyboard shortcuts" loading="lazy">
+        <div class="overlay">
+          <h4>Welcome Screen</h4>
+          <p>Clean landing page with 3-column keyboard shortcut reference and one-click folder open</p>
+        </div>
+      </div>
+
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/stacked.png')">
+        <img src="assets/screenshots/stacked.png" alt="Stacked layout view" loading="lazy">
+        <div class="overlay">
+          <h4>Stacked Layout</h4>
+          <p>Front camera on top, back camera below &mdash; great for comparing angles on wide monitors</p>
+        </div>
+      </div>
+
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/pip.png')">
+        <img src="assets/screenshots/pip.png" alt="Picture-in-Picture mode" loading="lazy">
+        <div class="overlay">
+          <h4>Picture-in-Picture</h4>
+          <p>Draggable PIP overlay with GPS coordinates visible. Press 3 to swap primary camera</p>
+        </div>
+      </div>
+
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/clips.png')">
+        <img src="assets/screenshots/clips.png" alt="Clip list drawer" loading="lazy">
+        <div class="overlay">
+          <h4>Clip Browser</h4>
+          <p>Sortable clip drawer with timestamps, F+B pairing badges, and instant navigation</p>
+        </div>
+      </div>
+
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/map.png')">
+        <img src="assets/screenshots/map.png" alt="GPS Map sidebar" loading="lazy">
+        <div class="overlay">
+          <h4>GPS Map Sidebar</h4>
+          <p>Interactive OpenStreetMap with coordinate search, multiple tile layers, and device location</p>
+        </div>
+      </div>
+
+      <div class="showcase-item" onclick="openLightbox('assets/screenshots/map_sidebar.png')">
+        <img src="assets/screenshots/map_sidebar.png" alt="Map with video playback" loading="lazy">
+        <div class="overlay">
+          <h4>Map + Playback</h4>
+          <p>Review dashcam footage alongside GPS position. Open in Google Maps or OpenStreetMap</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" style="padding-top: 0;">
     <p class="section-label">Features</p>
     <h2 class="section-title">Everything for Dashcam Review</h2>
     <p class="section-subtitle">From quick review to professional export &mdash; all in one lightweight desktop app</p>
@@ -416,7 +522,7 @@
       <div class="feature-card">
         <div class="feature-icon">&#128247;</div>
         <h3>Dual Camera Sync</h3>
-        <p>Auto-detects and pairs front & back camera files by timestamp with &plusmn;5s tolerance. Supports video_front/video_back folder structure and F/B filename suffixes.</p>
+        <p>Auto-detects and pairs front &amp; back camera files by timestamp with &plusmn;5s tolerance. Supports video_front/video_back folder structure and F/B filename suffixes.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#127916;</div>
@@ -426,37 +532,37 @@
       <div class="feature-card">
         <div class="feature-icon">&#9201;</div>
         <h3>Variable Speed (0.1x&ndash;5x)</h3>
-        <p>11 speed levels from 0.1x slow-motion to 5x fast-forward. Speed persists across clip changes. Perfect for reviewing timelapse dashcams at real-time pace.</p>
+        <p>11 speed levels from 0.1x slow-motion to 5x fast-forward. Speed persists across clip changes. Perfect for reviewing timelapse dashcams.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#127758;</div>
-        <h3>GPS & Interactive Map</h3>
-        <p>OpenStreetMap sidebar with device location, manual coordinate search, multiple tile layers (Standard, Topo, HOT), and links to Google Maps & OSM.</p>
+        <h3>GPS &amp; Interactive Map</h3>
+        <p>OpenStreetMap sidebar with device location, coordinate search, 3 tile layers (Standard, Topo, HOT), and links to Google Maps &amp; OSM.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128190;</div>
         <h3>FFmpeg Export</h3>
-        <p>Export composed videos in any layout mode with H.264 encoding. Applies sync offset automatically. Progress bar with percentage tracking.</p>
+        <p>Export composed videos in any layout mode with H.264 encoding. Sync offset applied automatically. Real-time progress tracking.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128203;</div>
         <h3>Batch Save with Progress</h3>
-        <p>Select multiple clips to save with a real-time counter showing "2/6 saved". Supports locked (protected) clip detection and per-camera filtering.</p>
+        <p>Select multiple clips and save with a live counter showing "2/6 saved". Supports locked clip detection and per-camera filtering.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#127929;</div>
         <h3>Independent Audio Control</h3>
-        <p>Mute front and back cameras independently. Front audio is used for export by default. Fine-tune sync offset with &plusmn;5000ms slider.</p>
+        <p>Mute front and back cameras independently. Fine-tune sync offset with a &plusmn;5000ms slider for perfect audio-video alignment.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#9000;</div>
         <h3>20+ Keyboard Shortcuts</h3>
-        <p>Full keyboard control: play/pause, seek, speed, layout, mute, panels, export, save, sort, fullscreen. All toggle shortcuts work as expected.</p>
+        <p>Full keyboard-first workflow: playback, seek, speed, layout, mute, panels, export, save, sort, and fullscreen. All toggles work in loop.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128736;</div>
-        <h3>Smart UI</h3>
-        <p>Auto-hiding controls after 5s of inactivity, video fills the full screen. Sortable clip drawer, locked clip badges, and responsive layout.</p>
+        <h3>Smart Auto-Hide UI</h3>
+        <p>Controls disappear after 5 seconds of inactivity during playback, letting the video fill the entire screen. Move the mouse to bring them back.</p>
       </div>
     </div>
   </section>
@@ -483,7 +589,7 @@
         </div>
 
         <div class="shortcut-group">
-          <h4>Layout & View</h4>
+          <h4>Layout &amp; View</h4>
           <div class="sc"><kbd>1</kbd> <span class="sc-label">Side by side</span></div>
           <div class="sc"><kbd>2</kbd> <span class="sc-label">Stacked</span></div>
           <div class="sc"><kbd>3</kbd> <span class="sc-label">PIP (toggle primary)</span></div>
@@ -525,7 +631,7 @@
       <div class="req-card">
         <div class="req-icon">&#128193;</div>
         <h4>Dashcam Folder</h4>
-        <p>video_front & video_back structure, or F/B suffixed filenames</p>
+        <p>video_front &amp; video_back structure, or F/B suffixed filenames</p>
       </div>
       <div class="req-card">
         <div class="req-icon">&#127916;</div>
@@ -537,13 +643,32 @@
 
   <!-- Footer -->
   <footer>
-    <p>DashCam Player v1.2.0 &middot; Built with Flutter, media_kit & Riverpod</p>
+    <p>DashCam Player v1.2.0 &middot; Built with Flutter, media_kit &amp; Riverpod</p>
     <div class="links">
       <a href="https://github.com/santos-k/Dashcam-Video-Player" target="_blank">GitHub</a>
       <a href="https://github.com/santos-k/Dashcam-Video-Player/releases" target="_blank">Releases</a>
       <a href="https://flutter.dev" target="_blank">Flutter</a>
     </div>
   </footer>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <span class="lb-close">&times;</span>
+    <img id="lb-img" src="" alt="Screenshot preview">
+  </div>
+
+  <script>
+    function openLightbox(src) {
+      document.getElementById('lb-img').src = src;
+      document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+  </script>
 
 </body>
 </html>

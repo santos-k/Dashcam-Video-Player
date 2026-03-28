@@ -8,6 +8,20 @@ A cross-platform Flutter desktop app that plays paired dashcam front/back videos
 
 ---
 
+## Screenshots
+
+| View | Screenshot |
+|---|---|
+| **Welcome Screen** — Clean landing page with 3-column shortcut reference | ![Landing](assets/screenshots/landing.png) |
+| **Side by Side** — Front and back cameras playing in perfect sync | ![Side by Side](assets/screenshots/side_by_side.png) |
+| **Stacked Layout** — Front on top, back below for wide monitors | ![Stacked](assets/screenshots/stacked.png) |
+| **Picture-in-Picture** — Draggable PIP overlay with GPS coordinates | ![PIP](assets/screenshots/pip.png) |
+| **Clip Browser** — Sortable drawer with timestamps and pairing badges | ![Clips](assets/screenshots/clips.png) |
+| **GPS Map** — Interactive OpenStreetMap sidebar with coordinate search | ![Map](assets/screenshots/map.png) |
+| **Map + Playback** — Review footage alongside GPS position | ![Map Sidebar](assets/screenshots/map_sidebar.png) |
+
+---
+
 ## Features
 
 | Feature | Details |
