@@ -14,6 +14,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onNext;
   final VoidCallback  onFolder;
   final VoidCallback  onLayout;
+  final GlobalKey?    layoutBtnKey;
   final VoidCallback? onSaveClip;
   final VoidCallback? onCloseFolder;
   final VoidCallback? onMap;
@@ -25,6 +26,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
     required this.onNext,
     required this.onFolder,
     required this.onLayout,
+    this.layoutBtnKey,
     this.onSaveClip,
     this.onCloseFolder,
     this.onMap,
@@ -159,9 +161,10 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           // Layout — only useful when both cameras are present
           if (playback.hasFront && playback.hasBack)
             _ToolBtn(
+              key:     widget.layoutBtnKey,
               icon:    Icons.view_quilt_rounded,
               label:   _layoutLabel(layout.mode),
-              tooltip: 'Change layout (L)',
+              tooltip: 'Change layout (L / 1-3)',
               onPressed: widget.onLayout,
             ),
           const SizedBox(width: 4),
@@ -683,6 +686,7 @@ class _ToolBtn extends StatelessWidget {
   final String   tooltip;
   final VoidCallback onPressed;
   const _ToolBtn({
+    super.key,
     required this.icon, required this.label,
     required this.tooltip, required this.onPressed,
   });

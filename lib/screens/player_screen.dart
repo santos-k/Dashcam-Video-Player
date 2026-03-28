@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import '../models/layout_config.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
 import '../widgets/dual_video_view.dart';
@@ -31,6 +32,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _mapSidebarOpen      = false;
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey _layoutBtnKey = GlobalKey();
 
   @override
   void initState() {
@@ -74,36 +76,53 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       appLog('Shortcut', 'Shift+, – previous clip');
       _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true);
     } else if (key == LogicalKeyboardKey.keyF) {
-      final next = !ref.read(frontMutedProvider);
-      appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} front');
-      ref.read(frontMutedProvider.notifier).state = next;
-      notifier.setFrontMuted(next);
+      // 'F': mute front (paired) or mute single camera
+      if (playback.isLoaded && playback.hasFront && !playback.hasBack) {
+        final next = !ref.read(frontMutedProvider);
+        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} (single)');
+        ref.read(frontMutedProvider.notifier).state = next;
+        notifier.setFrontMuted(next);
+      } else if (playback.isLoaded && !playback.hasFront && playback.hasBack) {
+        final next = !ref.read(backMutedProvider);
+        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} (single)');
+        ref.read(backMutedProvider.notifier).state = next;
+        notifier.setBackMuted(next);
+      } else {
+        final next = !ref.read(frontMutedProvider);
+        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} front');
+        ref.read(frontMutedProvider.notifier).state = next;
+        notifier.setFrontMuted(next);
+      }
     } else if (key == LogicalKeyboardKey.keyB) {
       final next = !ref.read(backMutedProvider);
       appLog('Shortcut', 'B – ${next ? "mute" : "unmute"} back');
       ref.read(backMutedProvider.notifier).state = next;
       notifier.setBackMuted(next);
     } else if (key == LogicalKeyboardKey.keyM && !shift) {
-      // 'M': single-camera mute toggle when unpaired, map when paired or no video
-      if (playback.isLoaded && playback.hasFront && !playback.hasBack) {
-        final next = !ref.read(frontMutedProvider);
-        ref.read(frontMutedProvider.notifier).state = next;
-        notifier.setFrontMuted(next);
-      } else if (playback.isLoaded && playback.hasBack && !playback.hasFront) {
-        final next = !ref.read(backMutedProvider);
-        ref.read(backMutedProvider.notifier).state = next;
-        notifier.setBackMuted(next);
-      } else {
-        // Paired or no video — toggle map sidebar
-        _toggleMapSidebar();
-      }
+      // 'M': always map sidebar
+      _toggleMapSidebar();
     } else if (key == LogicalKeyboardKey.keyO) {
       appLog('Shortcut', 'O – open folder');
       _pickFolder();
     } else if (key == LogicalKeyboardKey.keyL &&
                playback.hasFront && playback.hasBack) {
       appLog('Shortcut', 'L – layout selector');
-      showLayoutSelector(context).then((_) => _focusNode.requestFocus());
+      _showLayoutPopup();
+    } else if (key == LogicalKeyboardKey.digit1 &&
+               playback.hasFront && playback.hasBack) {
+      appLog('Shortcut', '1 – Side by side');
+      ref.read(layoutConfigProvider.notifier).state =
+          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.sideBySide);
+    } else if (key == LogicalKeyboardKey.digit2 &&
+               playback.hasFront && playback.hasBack) {
+      appLog('Shortcut', '2 – Stacked');
+      ref.read(layoutConfigProvider.notifier).state =
+          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.stacked);
+    } else if (key == LogicalKeyboardKey.digit3 &&
+               playback.hasFront && playback.hasBack) {
+      appLog('Shortcut', '3 – PIP');
+      ref.read(layoutConfigProvider.notifier).state =
+          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.pip);
     } else if (key == LogicalKeyboardKey.keyS) {
       appLog('Shortcut', 'S – toggle sort order');
       final current = ref.read(sortOrderProvider);
@@ -232,6 +251,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
+  void _showLayoutPopup() {
+    final box = _layoutBtnKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final pos = box.localToGlobal(Offset.zero);
+    showLayoutPopup(
+      context,
+      anchorRect: Rect.fromLTWH(pos.dx, pos.dy, box.size.width, box.size.height),
+    ).then((_) => _focusNode.requestFocus());
+  }
+
   void _closeFolder() {
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) return;
@@ -356,8 +385,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               onPrevious:     () => _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true),
               onNext:         () => _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true),
               onFolder:       _pickFolder,
-              onLayout:       () => showLayoutSelector(context)
-                  .then((_) => _focusNode.requestFocus()),
+              onLayout:       _showLayoutPopup,
+              layoutBtnKey:   _layoutBtnKey,
               onSaveClip:     _saveClip,
               onCloseFolder:  _closeFolder,
               onMap:          _toggleMapSidebar,
@@ -445,7 +474,8 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.videocam_outlined, color: Colors.white24, size: 64),
         const SizedBox(height: 14),
         const Text('Select your dashcam SD card or folder',
@@ -474,18 +504,21 @@ class _EmptyState extends StatelessWidget {
           child: const Column(children: [
             _ShortcutRow('Space',    'Play / Pause'),
             _ShortcutRow('← →',     'Seek ±10 seconds'),
-            _ShortcutRow('Shift+.', 'Next clip'),
-            _ShortcutRow('Shift+,', 'Previous clip'),
-            _ShortcutRow('F / B',   'Mute front / back (paired)'),
-            _ShortcutRow('M',       'Mute (single) / Map (paired)'),
-            _ShortcutRow('O',       'Open folder'),
-            _ShortcutRow('L',       'Change layout'),
-            _ShortcutRow('S',       'Toggle sort order'),
-            _ShortcutRow('W',       'Close folder'),
-            _ShortcutRow('F11',     'Toggle fullscreen'),
+            _ShortcutRow('Shift+.',  'Next clip'),
+            _ShortcutRow('Shift+,',  'Previous clip'),
+            _ShortcutRow('F',        'Mute (single) / Front (paired)'),
+            _ShortcutRow('B',        'Mute back (paired)'),
+            _ShortcutRow('M',        'Toggle map sidebar'),
+            _ShortcutRow('O',        'Open folder'),
+            _ShortcutRow('L',        'Change layout'),
+            _ShortcutRow('1 / 2 / 3','Side by side / Stacked / PIP'),
+            _ShortcutRow('S',        'Toggle sort order'),
+            _ShortcutRow('W',        'Close folder'),
+            _ShortcutRow('F11',      'Toggle fullscreen'),
           ]),
         ),
       ]),
+      ),
     );
   }
 }
@@ -500,15 +533,22 @@ class _ShortcutRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: Colors.white12),
+        SizedBox(
+          width: 100,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Text(keyLabel,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white60, fontSize: 11)),
+            ),
           ),
-          child: Text(keyLabel,
-            style: const TextStyle(color: Colors.white60, fontSize: 11)),
         ),
         const SizedBox(width: 10),
         Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
