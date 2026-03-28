@@ -25,6 +25,7 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
 
   static const double _minPipW = 160;
   static const double _maxPipW = 600;
+  static const double _pipMargin = 4.0;
 
   @override
   void initState() {
@@ -42,28 +43,70 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
     });
   }
 
-  Offset _defaultOffset(BoxConstraints bc, LayoutConfig layout) {
-    // Resolve grid position from pipHAlign / pipVAlign
+  /// Calculate the actual visible video rect within the container
+  /// (accounting for BoxFit.contain letterboxing).
+  Rect _videoRect(BoxConstraints bc, LayoutConfig layout) {
+    final mainCtrl = layout.pipPrimary == PipPrimary.front
+        ? _frontController : _backController;
+    final vw = mainCtrl.player.state.width;
+    final vh = mainCtrl.player.state.height;
+    if (vw == null || vh == null || vw == 0 || vh == 0) {
+      // Fallback to full container if video dimensions unknown
+      return Rect.fromLTWH(0, 0, bc.maxWidth, bc.maxHeight);
+    }
+
+    final containerAR = bc.maxWidth / bc.maxHeight;
+    final videoAR     = vw / vh;
+
+    double displayW, displayH, offsetX, offsetY;
+    if (videoAR > containerAR) {
+      // Video is wider — black bars top/bottom
+      displayW = bc.maxWidth;
+      displayH = bc.maxWidth / videoAR;
+      offsetX  = 0;
+      offsetY  = (bc.maxHeight - displayH) / 2;
+    } else {
+      // Video is taller — black bars left/right
+      displayH = bc.maxHeight;
+      displayW = bc.maxHeight * videoAR;
+      offsetX  = (bc.maxWidth - displayW) / 2;
+      offsetY  = 0;
+    }
+    return Rect.fromLTWH(offsetX, offsetY, displayW, displayH);
+  }
+
+  Offset _defaultOffset(Rect videoRect, LayoutConfig layout) {
     double x, y;
     const margin = 16.0;
 
     switch (layout.pipHAlign) {
-      case PipHAlign.left:   x = margin; break;
-      case PipHAlign.center: x = (bc.maxWidth  - _pipWidth)  / 2; break;
-      case PipHAlign.right:  x = bc.maxWidth  - _pipWidth  - margin; break;
+      case PipHAlign.left:   x = videoRect.left + margin; break;
+      case PipHAlign.center: x = videoRect.left + (videoRect.width  - _pipWidth)  / 2; break;
+      case PipHAlign.right:  x = videoRect.right - _pipWidth  - margin; break;
     }
     switch (layout.pipVAlign) {
-      case PipVAlign.top:    y = margin; break;
-      case PipVAlign.center: y = (bc.maxHeight - _pipHeight) / 2; break;
-      case PipVAlign.bottom: y = bc.maxHeight - _pipHeight - margin; break;
+      case PipVAlign.top:    y = videoRect.top + margin; break;
+      case PipVAlign.center: y = videoRect.top + (videoRect.height - _pipHeight) / 2; break;
+      case PipVAlign.bottom: y = videoRect.bottom - _pipHeight - margin; break;
     }
     return Offset(x, y);
   }
 
-  Offset _clamp(Offset o, BoxConstraints bc) => Offset(
-    o.dx.clamp(0, bc.maxWidth  - _pipWidth),
-    o.dy.clamp(0, bc.maxHeight - _pipHeight),
+  Offset _clamp(Offset o, Rect videoRect) => Offset(
+    o.dx.clamp(videoRect.left + _pipMargin, videoRect.right  - _pipWidth  - _pipMargin),
+    o.dy.clamp(videoRect.top  + _pipMargin, videoRect.bottom - _pipHeight - _pipMargin),
   );
+
+  /// Store fractional PIP position for export.
+  void _updateExportPosition(Rect videoRect) {
+    final rangeX = videoRect.width  - _pipWidth  - _pipMargin * 2;
+    final rangeY = videoRect.height - _pipHeight - _pipMargin * 2;
+    if (rangeX <= 0 || rangeY <= 0) return;
+    final fx = (_pipOffset.dx - videoRect.left - _pipMargin) / rangeX;
+    final fy = (_pipOffset.dy - videoRect.top  - _pipMargin) / rangeY;
+    ref.read(pipExportPositionProvider.notifier).state =
+        (fx.clamp(0.0, 1.0), fy.clamp(0.0, 1.0));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -105,13 +148,22 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
       case LayoutMode.pip:
         final mainVideo = layout.pipPrimary == PipPrimary.front ? front : back;
         final pipVideo  = layout.pipPrimary == PipPrimary.front ? back  : front;
-        final pipLabel  = layout.pipPrimary == PipPrimary.front ? 'BACK' : 'FRONT';
 
         return LayoutBuilder(builder: (context, bc) {
+          final vRect = _videoRect(bc, layout);
+
           // First time or after alignment change: snap to grid position
           if (_pipOffset.dx < 0) {
-            _pipOffset = _defaultOffset(bc, layout);
+            _pipOffset = _defaultOffset(vRect, layout);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                ref.read(pipExportPositionProvider.notifier).state = (-1.0, -1.0);
+              }
+            });
           }
+
+          // Re-clamp in case container/video size changed
+          _pipOffset = _clamp(_pipOffset, vRect);
 
           return Stack(clipBehavior: Clip.hardEdge, children: [
             // Main video fills everything
@@ -126,11 +178,13 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
                 onPanUpdate: (d) {
                   setState(() {
                     _isDragging = true;
-                    _pipOffset  = _clamp(
-                      _pipOffset + d.delta, bc);
+                    _pipOffset  = _clamp(_pipOffset + d.delta, vRect);
                   });
                 },
-                onPanEnd: (_) => setState(() => _isDragging = false),
+                onPanEnd: (_) {
+                  setState(() => _isDragging = false);
+                  _updateExportPosition(vRect);
+                },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 80),
                   width:  _pipWidth,
@@ -156,8 +210,6 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
                       // PIP video
                       pipVideo,
 
-                      // no label in PIP overlay
-
                       // Drag hint icon
                       if (!_isDragging)
                         Positioned(
@@ -181,9 +233,10 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
                     _pipWidth  = (_pipWidth  + d.delta.dx)
                         .clamp(_minPipW, _maxPipW);
                     _pipHeight = _pipWidth * (9 / 16); // maintain 16:9
-                    _pipOffset = _clamp(_pipOffset, bc);
+                    _pipOffset = _clamp(_pipOffset, vRect);
                   });
                 },
+                onPanEnd: (_) => _updateExportPosition(vRect),
                 child: Container(
                   width: 24, height: 24,
                   decoration: BoxDecoration(

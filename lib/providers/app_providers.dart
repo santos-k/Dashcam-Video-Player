@@ -342,6 +342,10 @@ final backMutedProvider  = StateProvider<bool>((ref) => false);
 // PIP position reset signal
 final pipResetProvider = StateProvider<int>((ref) => 0);
 
+// PIP export position — fractions (0..1) of available drag range.
+// (-1, -1) = use default alignment-based position.
+final pipExportPositionProvider = StateProvider<(double, double)>((ref) => (-1.0, -1.0));
+
 // ─────────────────────────────────────────
 // 11. Persisted map state (survives sidebar open/close)
 // ─────────────────────────────────────────

@@ -17,6 +17,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
   final GlobalKey?    layoutBtnKey;
   final VoidCallback? onSaveClip;
   final VoidCallback? onCloseFolder;
+  final VoidCallback? onQuit;
   final VoidCallback? onMap;
   final VoidCallback? focusRequester;
 
@@ -29,6 +30,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
     this.layoutBtnKey,
     this.onSaveClip,
     this.onCloseFolder,
+    this.onQuit,
     this.onMap,
     this.focusRequester,
   });
@@ -91,7 +93,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             label: sortOrder == SortOrder.oldestFirst
                 ? 'Oldest first'
                 : 'Newest first',
-            tooltip: 'Toggle sort order (S)',
+            tooltip: 'Toggle sort order (R)',
             onPressed: () {
               final next = sortOrder == SortOrder.oldestFirst
                   ? SortOrder.newestFirst
@@ -208,11 +210,22 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
 
           // Close folder
           _ToolBtn(
-            icon:    Icons.close_rounded,
-            label:   'Close',
+            icon:    Icons.folder_off_rounded,
+            label:   'Close Folder',
             tooltip: 'Close loaded folder (W)',
             onPressed: () {
               widget.onCloseFolder?.call();
+            },
+          ),
+          const SizedBox(width: 4),
+
+          // Quit
+          _ToolBtn(
+            icon:    Icons.power_settings_new_rounded,
+            label:   'Quit',
+            tooltip: 'Quit application (Q)',
+            onPressed: () {
+              widget.onQuit?.call();
             },
           ),
         ]),
@@ -367,6 +380,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
 
     final layout     = ref.read(layoutConfigProvider);
     final syncOffset = ref.read(syncOffsetProvider);
+    final pipPos     = ref.read(pipExportPositionProvider);
 
     ref.read(exportProgressProvider.notifier).state = 0.0;
 
@@ -375,6 +389,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
       layout:       layout,
       syncOffsetMs: syncOffset,
       outputPath:   savePath,
+      pipPosition:  pipPos,
       onProgress:   (p) =>
           ref.read(exportProgressProvider.notifier).state = p,
     );
@@ -382,11 +397,13 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     ref.read(exportProgressProvider.notifier).state = null;
 
     if (mounted) {
+      ScaffoldMessenger.of(ctx).clearSnackBars();
       ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
         content: Text(ok
             ? 'Exported to $savePath'
             : 'Export failed — is FFmpeg installed?'),
-        duration: const Duration(seconds: 4),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
         action: ok
             ? SnackBarAction(
                 label: 'Open folder',
@@ -447,7 +464,7 @@ class _ExportBtn extends StatelessWidget {
     final isExporting = progress != null;
 
     return Tooltip(
-      message: 'Export current clip (FFmpeg required)',
+      message: 'Export current clip (E)',
       child: GestureDetector(
         onTap: enabled ? onExport : null,
         child: AnimatedContainer(
@@ -632,7 +649,7 @@ class _SaveBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: isSaving ? 'Saving...' : 'Save clip files to a folder',
+      message: isSaving ? 'Saving...' : 'Save clip files to a folder (S)',
       child: GestureDetector(
         onTap: onPressed,
         child: AnimatedContainer(

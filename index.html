@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashcam Player — Dual Camera Video Player for Windows</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --border: #1e1e2a;
+      --accent: #4fc3f7;
+      --accent-dim: rgba(79, 195, 247, 0.12);
+      --text: #e0e0e6;
+      --text-dim: #8888a0;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Hero ─────────────────────────────── */
+    .hero {
+      min-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 60px 24px;
+      background:
+        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(79,195,247,0.08) 0%, transparent 100%),
+        var(--bg);
+    }
+
+    .hero-icon {
+      width: 80px; height: 80px;
+      border-radius: 20px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(79,195,247,0.2);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 28px;
+      font-size: 36px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+
+    .hero h1 span { color: var(--accent); }
+
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-dim);
+      max-width: 520px;
+      margin-bottom: 36px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #000;
+    }
+    .btn-primary:hover { background: #6fd0fa; transform: translateY(-1px); }
+
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    .version-badge {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    /* ── Features ─────────────────────────── */
+    .section {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 80px 24px;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-dim);
+      margin-bottom: 48px;
+      font-size: 1rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(79,195,247,0.3);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 42px; height: 42px;
+      border-radius: 10px;
+      background: var(--accent-dim);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+      font-size: 20px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    /* ── Shortcuts ────────────────────────── */
+    .shortcuts-section {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .shortcuts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px 32px;
+    }
+
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 0;
+    }
+
+    kbd {
+      display: inline-block;
+      min-width: 32px;
+      text-align: center;
+      padding: 3px 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 5px;
+      font-family: inherit;
+      font-size: 0.8rem;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .shortcut-label {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    /* ── Requirements ─────────────────────── */
+    .req-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+    }
+
+    .req-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      text-align: center;
+      min-width: 200px;
+    }
+
+    .req-item h4 {
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+
+    .req-item p {
+      color: var(--text-dim);
+      font-size: 0.82rem;
+    }
+
+    /* ── Footer ───────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 40px 24px;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Responsive ───────────────────────── */
+    @media (max-width: 600px) {
+      .hero { min-height: 80vh; padding: 40px 16px; }
+      .section { padding: 48px 16px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .shortcuts-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-icon">&#127909;</div>
+    <h1><span>Dashcam</span> Player</h1>
+    <p>A powerful dual-camera dashcam video player for Windows. Play, sync, and export front &amp; back camera footage with ease.</p>
+    <div class="hero-actions">
+      <a href="DashcamPlayer_Setup_v1.1.1.exe" class="btn btn-primary">
+        &#11015; Download Installer
+      </a>
+      <a href="https://github.com/santos-k/Dashcam-Video-Player" class="btn btn-secondary" target="_blank">
+        &#9733; View on GitHub
+      </a>
+    </div>
+    <span class="version-badge">v1.1.1 &middot; Windows x64</span>
+  </section>
+
+  <!-- Features -->
+  <section class="section">
+    <h2 class="section-title">Features</h2>
+    <p class="section-subtitle">Everything you need to review dashcam footage</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">&#128247;</div>
+        <h3>Dual Camera Sync</h3>
+        <p>Automatically detects and pairs front &amp; back camera files from your dashcam SD card. Fine-tune audio sync with millisecond offset control.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#127916;</div>
+        <h3>Flexible Layouts</h3>
+        <p>Switch between Side-by-side, Stacked, and Picture-in-Picture views. PIP is draggable and resizable with position memory.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#127758;</div>
+        <h3>GPS Map Integration</h3>
+        <p>Extracts GPS coordinates from video metadata and displays the location on an interactive OpenStreetMap sidebar with multiple tile layers.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128190;</div>
+        <h3>Export &amp; Save</h3>
+        <p>Export composed videos (side-by-side, stacked, or PIP) via FFmpeg with proper aspect ratio. Batch save or copy raw clip files.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#9000;</div>
+        <h3>Keyboard Shortcuts</h3>
+        <p>Full keyboard control for playback, navigation, layout switching, muting, and more. 20+ shortcuts for efficient workflow.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128736;</div>
+        <h3>Smart Clip Management</h3>
+        <p>Browse clips in a sortable drawer, navigate with shortcuts, and manage your dashcam footage effortlessly. Supports 100+ clips per folder.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Shortcuts -->
+  <section class="shortcuts-section">
+    <div class="section">
+      <h2 class="section-title">Keyboard Shortcuts</h2>
+      <p class="section-subtitle">Fast access to every feature</p>
+
+      <div class="shortcuts-grid">
+        <div class="shortcut-row"><kbd>Space</kbd> <span class="shortcut-label">Play / Pause</span></div>
+        <div class="shortcut-row"><kbd>&#8592; &#8594;</kbd> <span class="shortcut-label">Seek &plusmn;10 seconds</span></div>
+        <div class="shortcut-row"><kbd>Shift+.</kbd> <span class="shortcut-label">Next clip</span></div>
+        <div class="shortcut-row"><kbd>Shift+,</kbd> <span class="shortcut-label">Previous clip</span></div>
+        <div class="shortcut-row"><kbd>F</kbd> <span class="shortcut-label">Mute (single) / Front</span></div>
+        <div class="shortcut-row"><kbd>B</kbd> <span class="shortcut-label">Mute back camera</span></div>
+        <div class="shortcut-row"><kbd>C</kbd> <span class="shortcut-label">Clip list</span></div>
+        <div class="shortcut-row"><kbd>M</kbd> <span class="shortcut-label">Toggle map sidebar</span></div>
+        <div class="shortcut-row"><kbd>O</kbd> <span class="shortcut-label">Open folder</span></div>
+        <div class="shortcut-row"><kbd>S</kbd> <span class="shortcut-label">Save clips</span></div>
+        <div class="shortcut-row"><kbd>E</kbd> <span class="shortcut-label">Export video</span></div>
+        <div class="shortcut-row"><kbd>L</kbd> <span class="shortcut-label">Layout selector</span></div>
+        <div class="shortcut-row"><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <span class="shortcut-label">Side-by-side / Stacked / PIP</span></div>
+        <div class="shortcut-row"><kbd>R</kbd> <span class="shortcut-label">Toggle sort order</span></div>
+        <div class="shortcut-row"><kbd>W</kbd> <span class="shortcut-label">Close folder</span></div>
+        <div class="shortcut-row"><kbd>Q</kbd> <span class="shortcut-label">Quit application</span></div>
+        <div class="shortcut-row"><kbd>I</kbd> <span class="shortcut-label">About</span></div>
+        <div class="shortcut-row"><kbd>F11</kbd> <span class="shortcut-label">Toggle fullscreen</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Requirements -->
+  <section class="section">
+    <h2 class="section-title">Requirements</h2>
+    <p class="section-subtitle">What you need to get started</p>
+
+    <div class="req-list">
+      <div class="req-item">
+        <h4>&#128187; Windows 10+</h4>
+        <p>64-bit, x64 architecture</p>
+      </div>
+      <div class="req-item">
+        <h4>&#128247; Dashcam SD Card</h4>
+        <p>video_front &amp; video_back folders</p>
+      </div>
+      <div class="req-item">
+        <h4>&#127916; FFmpeg (optional)</h4>
+        <p>Required for video export only</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>Dashcam Player v1.1.1 &middot; Built with Flutter &amp; media_kit &middot;
+      <a href="https://github.com/santos-k/Dashcam-Video-Player" target="_blank">GitHub</a>
+    </p>
+  </footer>
+
+</body>
+</html>

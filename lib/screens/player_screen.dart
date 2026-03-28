@@ -16,6 +16,7 @@ import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
 import '../widgets/map_dialog.dart';
+import '../services/export_service.dart';
 import '../services/log_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -53,6 +54,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _handleKey(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
+
+    // Don't handle shortcuts when a text field has focus
+    if (!_focusNode.hasPrimaryFocus) return;
+
     final playback = ref.read(playbackProvider);
     final notifier = ref.read(playbackProvider.notifier);
     final key      = event.logicalKey;
@@ -123,8 +128,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       appLog('Shortcut', '3 – PIP');
       ref.read(layoutConfigProvider.notifier).state =
           ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.pip);
-    } else if (key == LogicalKeyboardKey.keyS) {
-      appLog('Shortcut', 'S – toggle sort order');
+    } else if (key == LogicalKeyboardKey.keyR) {
+      appLog('Shortcut', 'R – toggle sort order');
       final current = ref.read(sortOrderProvider);
       final next    = current == SortOrder.oldestFirst
           ? SortOrder.newestFirst
@@ -132,12 +137,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ref.read(sortOrderProvider.notifier).state = next;
       ref.read(videoPairListProvider.notifier).applySort(next);
       ref.read(currentIndexProvider.notifier).state = 0;
+    } else if (key == LogicalKeyboardKey.keyS && playback.isLoaded) {
+      appLog('Shortcut', 'S – save clips');
+      _saveClip();
+    } else if (key == LogicalKeyboardKey.keyE && playback.isLoaded) {
+      appLog('Shortcut', 'E – export');
+      _confirmExport();
+    } else if (key == LogicalKeyboardKey.keyC) {
+      appLog('Shortcut', 'C – clip list');
+      _scaffoldKey.currentState?.openDrawer();
+    } else if (key == LogicalKeyboardKey.keyI) {
+      appLog('Shortcut', 'I – about');
+      _showAbout();
     } else if (key == LogicalKeyboardKey.keyW) {
       appLog('Shortcut', 'W – close folder');
-      _closeFolder();
-    } else if (key == LogicalKeyboardKey.f11 ||
-               key == LogicalKeyboardKey.enter) {
-      appLog('Shortcut', '${key == LogicalKeyboardKey.f11 ? "F11" : "Enter"} – toggle fullscreen');
+      _confirmCloseFolder();
+    } else if (key == LogicalKeyboardKey.keyQ && !shift) {
+      appLog('Shortcut', 'Q – quit app');
+      _confirmQuit();
+    } else if (key == LogicalKeyboardKey.f11) {
+      appLog('Shortcut', 'F11 – toggle fullscreen');
       _toggleFullscreen();
     }
   }
@@ -261,9 +280,25 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ).then((_) => _focusNode.requestFocus());
   }
 
-  void _closeFolder() {
+  Future<void> _confirmCloseFolder() async {
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Close Folder', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text('Close the current folder with ${pairs.length} clips?',
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Close', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) { _focusNode.requestFocus(); return; }
     appLog('Folder', 'Close folder (${pairs.length} clips)');
     ref.read(playbackProvider.notifier).stop();
     ref.read(videoPairListProvider.notifier).clear();
@@ -272,6 +307,105 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(frontMutedProvider.notifier).state = false;
     ref.read(backMutedProvider.notifier).state = false;
     _focusNode.requestFocus();
+  }
+
+  Future<void> _confirmQuit() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Quit Application', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: const Text('Are you sure you want to quit?',
+            style: TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Quit', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) { _focusNode.requestFocus(); return; }
+    appLog('App', 'User quit');
+    ref.read(playbackProvider.notifier).stop();
+    await windowManager.destroy();
+  }
+
+  Future<void> _confirmExport() async {
+    final pair = ref.read(currentPairProvider);
+    if (pair == null) return;
+    if (ref.read(exportProgressProvider) != null) return; // already exporting
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Export Video', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text('Export clip "${pair.id}" with current layout settings?',
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Export', style: TextStyle(color: Color(0xFF4FC3F7)))),
+        ],
+      ),
+    );
+    _focusNode.requestFocus();
+    if (ok != true) return;
+    // Trigger the export via the controls widget's method isn't accessible,
+    // so we replicate the logic here
+    final savePath = await FilePicker.platform.saveFile(
+      dialogTitle:   'Save exported video',
+      fileName:      'dashcam_${pair.id}.mp4',
+      allowedExtensions: ['mp4'],
+      type: FileType.custom,
+    );
+    if (savePath == null) { _focusNode.requestFocus(); return; }
+
+    final layout     = ref.read(layoutConfigProvider);
+    final syncOffset = ref.read(syncOffsetProvider);
+    final pipPos     = ref.read(pipExportPositionProvider);
+
+    ref.read(exportProgressProvider.notifier).state = 0.0;
+
+    final exportOk = await ExportService.exportPair(
+      pair:         pair,
+      layout:       layout,
+      syncOffsetMs: syncOffset,
+      outputPath:   savePath,
+      pipPosition:  pipPos,
+      onProgress:   (p) =>
+          ref.read(exportProgressProvider.notifier).state = p,
+    );
+
+    ref.read(exportProgressProvider.notifier).state = null;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(exportOk
+            ? 'Exported to $savePath'
+            : 'Export failed — is FFmpeg installed?'),
+        duration: const Duration(seconds: 5),
+        action: exportOk
+            ? SnackBarAction(
+                label: 'Open folder',
+                onPressed: () => Process.run('explorer', ['/select,', savePath]),
+              )
+            : null,
+      ));
+    }
+    _focusNode.requestFocus();
+  }
+
+  void _showAbout() {
+    final box = context.findRenderObject() as RenderBox?;
+    // Find the about icon position — use a fallback top-right
+    // We'll show it near top-right of the screen
+    final screenSize = MediaQuery.of(context).size;
+    _showAboutPopupAt(
+      context,
+      Rect.fromLTWH(screenSize.width - 60, 36, 30, 30),
+    );
   }
 
   Future<void> _saveClip() async {
@@ -388,7 +522,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               onLayout:       _showLayoutPopup,
               layoutBtnKey:   _layoutBtnKey,
               onSaveClip:     _saveClip,
-              onCloseFolder:  _closeFolder,
+              onCloseFolder:  _confirmCloseFolder,
+              onQuit:         _confirmQuit,
               onMap:          _toggleMapSidebar,
               focusRequester: _focusNode.requestFocus,
             ),
@@ -424,7 +559,7 @@ class _MinimalTopBar extends StatelessWidget {
           builder: (ctx) => IconButton(
             icon:    const Icon(Icons.menu_rounded, color: Colors.white60),
             onPressed: () => Scaffold.of(ctx).openDrawer(),
-            tooltip: 'Clip list',
+            tooltip: 'Clip list (C)',
             iconSize: 20,
           ),
         ),
@@ -444,6 +579,24 @@ class _MinimalTopBar extends StatelessWidget {
           ),
         ],
         const Spacer(),
+        Builder(
+          builder: (ctx) => Tooltip(
+            message: 'About',
+            child: IconButton(
+              icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
+              onPressed: () {
+                final box = ctx.findRenderObject() as RenderBox;
+                final pos = box.localToGlobal(Offset.zero);
+                _showAboutPopupAt(ctx,
+                    Rect.fromLTWH(pos.dx, pos.dy, box.size.width, box.size.height));
+              },
+              iconSize: 18,
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(),
+            ),
+          ),
+        ),
+        const SizedBox(width: 2),
         Tooltip(
           message: isFullscreen ? 'Exit fullscreen (F11)' : 'Fullscreen (F11)',
           child: IconButton(
@@ -460,6 +613,118 @@ class _MinimalTopBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
+      ]),
+    );
+  }
+
+}
+
+void _showAboutPopupAt(BuildContext context, Rect anchorRect) {
+    final screenW = MediaQuery.of(context).size.width;
+    const popupW = 320.0;
+
+    // Align right edge with icon, clamp to screen
+    double left = anchorRect.right - popupW;
+    left = left.clamp(8.0, screenW - popupW - 8);
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'About',
+      barrierColor: Colors.black26,
+      transitionDuration: const Duration(milliseconds: 150),
+      transitionBuilder: (ctx, anim, _, child) {
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.05),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
+            child: child,
+          ),
+        );
+      },
+      pageBuilder: (ctx, _, __) {
+        return Stack(
+          children: [
+            Positioned(
+              left: left,
+              top: anchorRect.bottom + 4,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: popupW,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.videocam_rounded, color: Color(0xFF4FC3F7), size: 22),
+                        SizedBox(width: 8),
+                        Text('Dashcam Player',
+                          style: TextStyle(color: Colors.white, fontSize: 15,
+                              fontWeight: FontWeight.w600)),
+                      ]),
+                      const SizedBox(height: 4),
+                      const Text('Version 1.1.1',
+                        style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
+                      const SizedBox(height: 12),
+                      const Text('Features',
+                        style: TextStyle(color: Colors.white70, fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      const _AboutFeature(Icons.folder_open_rounded, 'Auto-detect front & back camera folders'),
+                      const _AboutFeature(Icons.play_circle_outline_rounded, 'Synchronized dual-camera playback'),
+                      const _AboutFeature(Icons.view_quilt_rounded, 'Side-by-side, Stacked & PIP layouts'),
+                      const _AboutFeature(Icons.picture_in_picture_rounded, 'Draggable & resizable PIP overlay'),
+                      const _AboutFeature(Icons.map_rounded, 'GPS extraction & interactive map'),
+                      const _AboutFeature(Icons.movie_creation_rounded, 'Export composed videos via FFmpeg'),
+                      const _AboutFeature(Icons.save_rounded, 'Batch save / copy clips'),
+                      const _AboutFeature(Icons.sync_rounded, 'Audio sync offset adjustment'),
+                      const _AboutFeature(Icons.keyboard_rounded, 'Full keyboard shortcut support'),
+                      const _AboutFeature(Icons.fullscreen_rounded, 'Fullscreen & wakelock'),
+                      const SizedBox(height: 10),
+                      const Text('Built with Flutter & media_kit',
+                        style: TextStyle(color: Colors.white38, fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+class _AboutFeature extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _AboutFeature(this.icon, this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        Icon(icon, color: const Color(0xFF4FC3F7), size: 14),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text,
+          style: const TextStyle(color: Colors.white60, fontSize: 12))),
       ]),
     );
   }
@@ -508,12 +773,17 @@ class _EmptyState extends StatelessWidget {
             _ShortcutRow('Shift+,',  'Previous clip'),
             _ShortcutRow('F',        'Mute (single) / Front (paired)'),
             _ShortcutRow('B',        'Mute back (paired)'),
+            _ShortcutRow('C',        'Clip list'),
             _ShortcutRow('M',        'Toggle map sidebar'),
             _ShortcutRow('O',        'Open folder'),
+            _ShortcutRow('S',        'Save clips'),
+            _ShortcutRow('E',        'Export video'),
             _ShortcutRow('L',        'Change layout'),
             _ShortcutRow('1 / 2 / 3','Side by side / Stacked / PIP'),
-            _ShortcutRow('S',        'Toggle sort order'),
+            _ShortcutRow('R',        'Toggle sort order'),
             _ShortcutRow('W',        'Close folder'),
+            _ShortcutRow('Q',        'Quit application'),
+            _ShortcutRow('I',        'About'),
             _ShortcutRow('F11',      'Toggle fullscreen'),
           ]),
         ),

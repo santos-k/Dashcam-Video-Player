@@ -244,6 +244,7 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                               child: _CoordInput(
                                 label: 'Lat', hint: '20.5937',
                                 controller: _latCtrl,
+                                onSubmitted: _searchCoords,
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -251,6 +252,7 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                               child: _CoordInput(
                                 label: 'Lon', hint: '78.9629',
                                 controller: _lonCtrl,
+                                onSubmitted: _searchCoords,
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -395,8 +397,10 @@ class _CoordInput extends StatelessWidget {
   final String label;
   final String hint;
   final TextEditingController controller;
+  final VoidCallback? onSubmitted;
   const _CoordInput({
     required this.label, required this.hint, required this.controller,
+    this.onSubmitted,
   });
 
   @override
@@ -408,6 +412,7 @@ class _CoordInput extends StatelessWidget {
       inputFormatters: [
         FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-+]')),
       ],
+      onSubmitted: onSubmitted != null ? (_) => onSubmitted!() : null,
       style: const TextStyle(color: Colors.white70, fontSize: 12),
       decoration: InputDecoration(
         labelText: label, hintText: hint,

@@ -15,6 +15,7 @@ class ExportService {
     required LayoutConfig layout,
     required int syncOffsetMs,
     required String outputPath,
+    (double, double)? pipPosition,
     void Function(double progress)? onProgress,
   }) async {
     // Find FFmpeg
@@ -29,7 +30,7 @@ class ExportService {
       duration = await _probeDuration(ffmpeg, pair.frontFile?.path ?? pair.backFile!.path);
     } catch (_) {}
 
-    final args = _buildArgs(pair, layout, syncOffsetMs, outputPath);
+    final args = _buildArgs(pair, layout, syncOffsetMs, outputPath, pipPosition);
 
     final process = await Process.start(ffmpeg, args);
 
@@ -60,6 +61,7 @@ class ExportService {
     LayoutConfig layout,
     int syncOffsetMs,
     String outputPath,
+    (double, double)? pipPosition,
   ) {
     // Sync offsets
     final frontDelay = syncOffsetMs < 0
@@ -76,7 +78,7 @@ class ExportService {
               '-preset', 'fast', '-c:a', 'aac', '-y', outputPath];
     }
 
-    final filter = _filterGraph(layout);
+    final filter = _filterGraph(layout, pipPosition);
 
     return [
       '-itsoffset', frontDelay,
@@ -95,23 +97,47 @@ class ExportService {
     ];
   }
 
-  static String _filterGraph(LayoutConfig layout) {
+  static String _filterGraph(LayoutConfig layout, (double, double)? pipPosition) {
     switch (layout.mode) {
       case LayoutMode.sideBySide:
-        return '[0:v]scale=960:540[v0];[1:v]scale=960:540[v1];[v0][v1]hstack=inputs=2[out]';
+        return '[0:v]scale=960:540:force_original_aspect_ratio=decrease,'
+            'pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black[v0];'
+            '[1:v]scale=960:540:force_original_aspect_ratio=decrease,'
+            'pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black[v1];'
+            '[v0][v1]hstack=inputs=2[out]';
       case LayoutMode.stacked:
-        return '[0:v]scale=1920:540[v0];[1:v]scale=1920:540[v1];[v0][v1]vstack=inputs=2[out]';
+        return '[0:v]scale=1920:540:force_original_aspect_ratio=decrease,'
+            'pad=1920:540:(ow-iw)/2:(oh-ih)/2:color=black[v0];'
+            '[1:v]scale=1920:540:force_original_aspect_ratio=decrease,'
+            'pad=1920:540:(ow-iw)/2:(oh-ih)/2:color=black[v1];'
+            '[v0][v1]vstack=inputs=2[out]';
       case LayoutMode.pip:
         final mainIdx = layout.pipPrimary == PipPrimary.front ? 0 : 1;
         final pipIdx  = layout.pipPrimary == PipPrimary.front ? 1 : 0;
-        final pos     = _pipPos(layout);
-        return '[$mainIdx:v]scale=1920:1080[main];'
+        final pos     = _pipPos(layout, pipPosition);
+        return '[$mainIdx:v]scale=1920:1080:force_original_aspect_ratio=decrease,'
+            'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[main];'
             '[$pipIdx:v]scale=480:270[pip];'
             '[main][pip]overlay=${pos[0]}:${pos[1]}[out]';
     }
   }
 
-  static List<String> _pipPos(LayoutConfig layout) {
+  static List<String> _pipPos(LayoutConfig layout, (double, double)? pipPosition) {
+    // Use actual dragged position if available
+    if (pipPosition != null && pipPosition.$1 >= 0 && pipPosition.$2 >= 0) {
+      const mainW = 1920;
+      const mainH = 1080;
+      const pipW  = 480;
+      const pipH  = 270;
+      const margin = 4;
+      final rangeX = mainW - pipW - margin * 2;
+      final rangeY = mainH - pipH - margin * 2;
+      final x = (margin + pipPosition.$1 * rangeX).round();
+      final y = (margin + pipPosition.$2 * rangeY).round();
+      return ['$x', '$y'];
+    }
+
+    // Fallback to alignment-based position
     final x = switch (layout.pipHAlign) {
       PipHAlign.left   => '20',
       PipHAlign.center => '(1920-480)/2',
