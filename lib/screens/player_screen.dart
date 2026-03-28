@@ -31,6 +31,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _isFullscreen        = false;
   bool _fullscreenTransiting = false;
   bool _mapSidebarOpen      = false;
+  bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
@@ -53,6 +54,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _handleKey(KeyEvent event) {
+    // Shift-alone toggles fullscreen (on key release, only if not used as modifier)
+    if (event is KeyUpEvent &&
+        (event.logicalKey == LogicalKeyboardKey.shiftLeft ||
+         event.logicalKey == LogicalKeyboardKey.shiftRight)) {
+      if (!_shiftUsedAsModifier) {
+        appLog('Shortcut', 'Shift – toggle fullscreen');
+        _toggleFullscreen();
+      }
+      _shiftUsedAsModifier = false;
+      return;
+    }
+
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
 
     // Don't handle shortcuts when a text field has focus
@@ -62,6 +75,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final notifier = ref.read(playbackProvider.notifier);
     final key      = event.logicalKey;
     final shift    = HardwareKeyboard.instance.isShiftPressed;
+
+    // Mark shift as used with another key (so Shift release won't toggle fullscreen)
+    if (shift &&
+        key != LogicalKeyboardKey.shiftLeft &&
+        key != LogicalKeyboardKey.shiftRight) {
+      _shiftUsedAsModifier = true;
+    }
 
     if (key == LogicalKeyboardKey.space && playback.isLoaded) {
       appLog('Shortcut', 'Space – toggle play/pause');
@@ -158,6 +178,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.f11) {
       appLog('Shortcut', 'F11 – toggle fullscreen');
       _toggleFullscreen();
+    } else if (key == LogicalKeyboardKey.bracketRight && playback.isLoaded) {
+      // ] — increase speed
+      final current = ref.read(playbackSpeedProvider);
+      final idx = playbackSpeeds.indexOf(current);
+      if (idx < playbackSpeeds.length - 1) {
+        final next = playbackSpeeds[idx + 1];
+        appLog('Shortcut', '] – speed ${next}x');
+        ref.read(playbackSpeedProvider.notifier).state = next;
+        notifier.setSpeed(next);
+      }
+    } else if (key == LogicalKeyboardKey.bracketLeft && playback.isLoaded) {
+      // [ — decrease speed
+      final current = ref.read(playbackSpeedProvider);
+      final idx = playbackSpeeds.indexOf(current);
+      if (idx > 0) {
+        final next = playbackSpeeds[idx - 1];
+        appLog('Shortcut', '[ – speed ${next}x');
+        ref.read(playbackSpeedProvider.notifier).state = next;
+        notifier.setSpeed(next);
+      }
+    } else if (key == LogicalKeyboardKey.backslash && playback.isLoaded) {
+      // \ — reset speed to 1x
+      appLog('Shortcut', '\\ – speed reset to 1x');
+      ref.read(playbackSpeedProvider.notifier).state = 1.0;
+      notifier.setSpeed(1.0);
     }
   }
 
@@ -188,7 +233,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
-    ref.read(playbackProvider.notifier).loadPair(pairs[index], 0, autoPlay: autoPlay);
+    final speed = ref.read(playbackSpeedProvider);
+    ref.read(playbackProvider.notifier)
+        .loadPair(pairs[index], 0, autoPlay: autoPlay)
+        .then((_) {
+      // Re-apply current speed to the new clip
+      if (speed != 1.0) {
+        ref.read(playbackProvider.notifier).setSpeed(speed);
+      }
+    });
+    // Trigger GPS extraction in background
+    _extractGps(pairs[index]);
+  }
+
+  void _extractGps(VideoPair pair) {
+    final videoPath = pair.frontPath ?? pair.backPath;
+    if (videoPath == null) return;
+    extractGpsForVideo(ref, videoPath);
   }
 
   void _onClipEnd() {
@@ -253,9 +314,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state   = 0;
+    ref.read(playbackSpeedProvider.notifier).state = 1.0;
     final notifier = ref.read(playbackProvider.notifier);
     notifier.onClipEnd = _onClipEnd;
     await notifier.loadPair(pairs.first, 0, autoPlay: false);
+    _extractGps(pairs.first);
     _focusNode.requestFocus();
   }
 
@@ -304,8 +367,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(videoPairListProvider.notifier).clear();
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state = 0;
+    ref.read(playbackSpeedProvider.notifier).state = 1.0;
     ref.read(frontMutedProvider.notifier).state = false;
     ref.read(backMutedProvider.notifier).state = false;
+    ref.read(gpsPointsProvider.notifier).state = [];
     _focusNode.requestFocus();
   }
 
@@ -598,7 +663,7 @@ class _MinimalTopBar extends StatelessWidget {
         ),
         const SizedBox(width: 2),
         Tooltip(
-          message: isFullscreen ? 'Exit fullscreen (F11)' : 'Fullscreen (F11)',
+          message: isFullscreen ? 'Exit fullscreen (Shift)' : 'Fullscreen (Shift)',
           child: IconButton(
             icon: Icon(
               isFullscreen
@@ -680,7 +745,7 @@ void _showAboutPopupAt(BuildContext context, Rect anchorRect) {
                               fontWeight: FontWeight.w600)),
                       ]),
                       const SizedBox(height: 4),
-                      const Text('Version 1.1.1',
+                      const Text('Version 1.2.0',
                         style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
                       const SizedBox(height: 12),
                       const Text('Features',
@@ -691,7 +756,8 @@ void _showAboutPopupAt(BuildContext context, Rect anchorRect) {
                       const _AboutFeature(Icons.play_circle_outline_rounded, 'Synchronized dual-camera playback'),
                       const _AboutFeature(Icons.view_quilt_rounded, 'Side-by-side, Stacked & PIP layouts'),
                       const _AboutFeature(Icons.picture_in_picture_rounded, 'Draggable & resizable PIP overlay'),
-                      const _AboutFeature(Icons.map_rounded, 'GPS extraction & interactive map'),
+                      const _AboutFeature(Icons.speed_rounded, 'Variable speed playback (0.25x-5x)'),
+                      const _AboutFeature(Icons.map_rounded, 'Live GPS tracking & interactive map'),
                       const _AboutFeature(Icons.movie_creation_rounded, 'Export composed videos via FFmpeg'),
                       const _AboutFeature(Icons.save_rounded, 'Batch save / copy clips'),
                       const _AboutFeature(Icons.sync_rounded, 'Audio sync offset adjustment'),
@@ -780,11 +846,13 @@ class _EmptyState extends StatelessWidget {
             _ShortcutRow('E',        'Export video'),
             _ShortcutRow('L',        'Change layout'),
             _ShortcutRow('1 / 2 / 3','Side by side / Stacked / PIP'),
+            _ShortcutRow('[ / ]',    'Decrease / increase speed'),
+            _ShortcutRow('\\',       'Reset speed to 1x'),
             _ShortcutRow('R',        'Toggle sort order'),
             _ShortcutRow('W',        'Close folder'),
             _ShortcutRow('Q',        'Quit application'),
             _ShortcutRow('I',        'About'),
-            _ShortcutRow('F11',      'Toggle fullscreen'),
+            _ShortcutRow('Shift',    'Toggle fullscreen'),
           ]),
         ),
       ]),

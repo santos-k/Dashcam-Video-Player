@@ -319,6 +319,18 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             enabled: hasNext, tooltip: 'Next (Shift+.)',
             onPressed: () { widget.onNext(); widget.focusRequester?.call(); }),
 
+          const SizedBox(width: 12),
+
+          // Speed control
+          _SpeedBtn(
+            enabled: isLoaded,
+            onChanged: (speed) {
+              ref.read(playbackSpeedProvider.notifier).state = speed;
+              notifier.setSpeed(speed);
+              widget.focusRequester?.call();
+            },
+          ),
+
           const Spacer(),
 
           // Sync toggle
@@ -729,4 +741,81 @@ class _ToolBtn extends StatelessWidget {
       ),
     ),
   );
+}
+
+// ─── Speed control button ───────────────────────────────────────────────────
+
+class _SpeedBtn extends ConsumerWidget {
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+  const _SpeedBtn({required this.enabled, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final speed = ref.watch(playbackSpeedProvider);
+    final isNormal = speed == 1.0;
+
+    return PopupMenuButton<double>(
+      onSelected: onChanged,
+      enabled: enabled,
+      tooltip: 'Playback speed ([ / ])',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      color: const Color(0xFF222222),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      itemBuilder: (_) => [
+        for (final s in playbackSpeeds)
+          PopupMenuItem(
+            value: s,
+            height: 36,
+            child: Row(children: [
+              if (s == speed)
+                const Icon(Icons.check_rounded, size: 14, color: Color(0xFF4FC3F7))
+              else
+                const SizedBox(width: 14),
+              const SizedBox(width: 8),
+              Text(
+                s == s.roundToDouble() ? '${s.round()}x' : '${s}x',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: s == speed ? const Color(0xFF4FC3F7) : Colors.white60,
+                  fontWeight: s == speed ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ]),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: isNormal
+              ? Colors.white.withValues(alpha: 0.06)
+              : const Color(0xFF4FC3F7).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isNormal
+                ? Colors.white12
+                : const Color(0xFF4FC3F7).withValues(alpha: 0.5),
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.speed_rounded, size: 13,
+            color: isNormal
+                ? (enabled ? Colors.white54 : Colors.white24)
+                : const Color(0xFF4FC3F7)),
+          const SizedBox(width: 4),
+          Text(
+            speed == speed.roundToDouble() ? '${speed.round()}x' : '${speed}x',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isNormal
+                  ? (enabled ? Colors.white54 : Colors.white24)
+                  : const Color(0xFF4FC3F7),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
 }

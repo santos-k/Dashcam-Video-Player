@@ -4,6 +4,7 @@
 // multiple tile layers, and browser-open buttons.  State (coordinates, zoom,
 // tile layer) is persisted via Riverpod so it survives open/close cycles.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -11,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_providers.dart';
+import '../models/gps_point.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
 
@@ -43,6 +45,12 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   // Marker position (null = no marker)
   LatLng? _marker;
 
+  // Live GPS tracking
+  Timer? _gpsTimer;
+  bool   _liveTracking = false;
+  List<LatLng> _route = [];
+  double? _currentSpeed;
+
   static const _tileLayers = [
     (label: 'Standard', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     (label: 'Topo',     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
@@ -63,6 +71,9 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
     if (saved.lat == null && widget.videoPath != null) {
       _tryExtractGPS();
     }
+
+    // Start live GPS tracking
+    _startGpsTracking();
   }
 
   @override
@@ -75,12 +86,72 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
 
   @override
   void dispose() {
+    _gpsTimer?.cancel();
     // Persist is handled via onClose / close button; ref is already invalid
     // during dispose, so we only clean up controllers here.
     _latCtrl.dispose();
     _lonCtrl.dispose();
     _mapController.dispose();
     super.dispose();
+  }
+
+  // ─── Live GPS tracking ─────────────────────────────────────────────────────
+
+  void _startGpsTracking() {
+    _gpsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _updateGpsFromPlayback();
+    });
+  }
+
+  void _updateGpsFromPlayback() {
+    if (!mounted) return;
+
+    final gpsPoints = ref.read(gpsPointsProvider);
+    if (gpsPoints.isEmpty) return;
+
+    final playback = ref.read(playbackProvider);
+    if (!playback.isLoaded) return;
+
+    final notifier = ref.read(playbackProvider.notifier);
+    final player = playback.hasFront ? notifier.frontPlayer : notifier.backPlayer;
+    final position = player.state.position;
+
+    // Find the nearest GPS point to the current playback position
+    GpsPoint? nearest;
+    int minDiff = 999999999;
+    for (final point in gpsPoints) {
+      final diff = (point.timestamp.inMilliseconds - position.inMilliseconds).abs();
+      if (diff < minDiff) {
+        minDiff = diff;
+        nearest = point;
+      }
+    }
+
+    if (nearest == null) return;
+
+    final newPos = LatLng(nearest.lat, nearest.lon);
+
+    // Build route from all points up to current position
+    final routePoints = <LatLng>[];
+    for (final pt in gpsPoints) {
+      if (pt.timestamp <= position + const Duration(seconds: 3)) {
+        routePoints.add(LatLng(pt.lat, pt.lon));
+      }
+    }
+
+    setState(() {
+      _liveTracking = true;
+      _marker = newPos;
+      _route = routePoints;
+      _currentSpeed = nearest!.speed;
+      _latCtrl.text = nearest.lat.toStringAsFixed(6);
+      _lonCtrl.text = nearest.lon.toStringAsFixed(6);
+    });
+
+    // Auto-center on marker during live tracking
+    try {
+      _mapController.move(newPos, _mapController.camera.zoom);
+    } catch (_) {}
   }
 
   /// Save current state to provider so it survives sidebar close/reopen.
@@ -307,6 +378,45 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                       ),
                     ),
 
+                    // ─── Live GPS info bar ──────────────
+                    if (_liveTracking) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        color: const Color(0xFF1A1A1A),
+                        child: Row(children: [
+                          const Icon(Icons.gps_fixed_rounded,
+                              size: 12, color: Color(0xFF4FC3F7)),
+                          const SizedBox(width: 6),
+                          const Text('Live',
+                            style: TextStyle(color: Color(0xFF4FC3F7),
+                                fontSize: 10, fontWeight: FontWeight.w600)),
+                          const Spacer(),
+                          if (_currentSpeed != null)
+                            Text('${_currentSpeed!.round()} km/h',
+                              style: const TextStyle(
+                                  color: Colors.white60, fontSize: 10)),
+                          const SizedBox(width: 8),
+                          Text('${ref.read(gpsPointsProvider).length} pts',
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 10)),
+                        ]),
+                      ),
+                    ],
+
+                    if (ref.watch(isExtractingGpsProvider))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        color: const Color(0xFF1A1A1A),
+                        child: const Row(children: [
+                          SizedBox(width: 12, height: 12,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 1.5, color: Color(0xFF4FC3F7))),
+                          SizedBox(width: 8),
+                          Text('Extracting GPS data...',
+                            style: TextStyle(color: Colors.white38, fontSize: 10)),
+                        ]),
+                      ),
+
                     // ─── Interactive map ─────────────────
                     Expanded(
                       child: FlutterMap(
@@ -327,6 +437,15 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                             userAgentPackageName: 'com.dashcam.player',
                             maxZoom: 18,
                           ),
+                          // Route polyline
+                          if (_route.length >= 2)
+                            PolylineLayer(polylines: [
+                              Polyline(
+                                points: _route,
+                                strokeWidth: 3,
+                                color: const Color(0xFF4FC3F7).withValues(alpha: 0.7),
+                              ),
+                            ]),
                           // Marker
                           if (_marker != null)
                             MarkerLayer(markers: [
@@ -334,8 +453,15 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                                 point: _marker!,
                                 width: 40, height: 40,
                                 alignment: Alignment.topCenter,
-                                child: const Icon(Icons.location_on,
-                                    color: Colors.red, size: 40),
+                                child: Icon(
+                                  _liveTracking
+                                      ? Icons.navigation_rounded
+                                      : Icons.location_on,
+                                  color: _liveTracking
+                                      ? const Color(0xFF4FC3F7)
+                                      : Colors.red,
+                                  size: 36,
+                                ),
                               ),
                             ]),
                           // Zoom buttons
