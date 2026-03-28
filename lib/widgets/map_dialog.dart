@@ -127,23 +127,22 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
     if (mounted) setState(() => _loading = false);
   }
 
-  /// Get device GPS location via PowerShell (Windows) or system commands.
+  /// Get device GPS location via Windows.Devices.Geolocation (UWP API).
   static Future<(double, double)?> _getDeviceLocation() async {
     if (Platform.isWindows) {
       try {
         final result = await Process.run('powershell', [
           '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
           r'''
-Add-Type -AssemblyName System.Device
-$w = New-Object System.Device.Location.GeoCoordinateWatcher
-$w.Start()
-$timeout = 10
-while($w.Status -ne 'Ready' -and $timeout -gt 0){Start-Sleep -Seconds 1;$timeout--}
-if($w.Status -eq 'Ready'){
-  $c=$w.Position.Location
-  Write-Output "$($c.Latitude),$($c.Longitude)"
-}
-$w.Stop()
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[void][Windows.Devices.Geolocation.Geolocator,Windows.Foundation,ContentType=WindowsRuntime]
+$a=([System.WindowsRuntimeSystemExtensions].GetMethods()|?{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'})[0]
+function W($t,$r){$m=$a.MakeGenericMethod($r);$n=$m.Invoke($null,@($t));$n.Wait(-1)|Out-Null;$n.Result}
+$g=New-Object Windows.Devices.Geolocation.Geolocator
+$g.DesiredAccuracy=[Windows.Devices.Geolocation.PositionAccuracy]::High
+$pos=W($g.GetGeopositionAsync())([Windows.Devices.Geolocation.Geoposition])
+$c=$pos.Coordinate.Point.Position
+Write-Output "$($c.Latitude),$($c.Longitude)"
 ''',
         ]);
         if (result.exitCode == 0) {

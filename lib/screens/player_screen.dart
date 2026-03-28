@@ -33,6 +33,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _fullscreenTransiting = false;
   bool _mapSidebarOpen      = false;
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
+  bool _aboutOpen           = false;   // track About popup for toggle
   Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -83,12 +84,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
 
-    // Don't handle shortcuts when a text field has focus
+    final key = event.logicalKey;
+
+    // Toggle shortcuts that work even when a drawer/dialog has focus
+    if (key == LogicalKeyboardKey.keyM &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _toggleMapSidebar();
+      return;
+    } else if (key == LogicalKeyboardKey.keyC) {
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      } else {
+        _scaffoldKey.currentState?.openDrawer();
+      }
+      return;
+    } else if (key == LogicalKeyboardKey.keyI) {
+      setState(() => _aboutOpen = !_aboutOpen);
+      return;
+    } else if (key == LogicalKeyboardKey.escape) {
+      if (_aboutOpen) {
+        setState(() => _aboutOpen = false);
+      } else {
+        Navigator.of(context).maybePop();
+      }
+      _focusNode.requestFocus();
+      return;
+    }
+
+    // Don't handle remaining shortcuts when a text field or dialog has focus
     if (!_focusNode.hasPrimaryFocus) return;
 
     final playback = ref.read(playbackProvider);
     final notifier = ref.read(playbackProvider.notifier);
-    final key      = event.logicalKey;
     final shift    = HardwareKeyboard.instance.isShiftPressed;
 
     // Mark shift as used with another key (so Shift release won't toggle fullscreen)
@@ -138,9 +165,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       appLog('Shortcut', 'B – ${next ? "mute" : "unmute"} back');
       ref.read(backMutedProvider.notifier).state = next;
       notifier.setBackMuted(next);
-    } else if (key == LogicalKeyboardKey.keyM && !shift) {
-      // 'M': always map sidebar
-      _toggleMapSidebar();
     } else if (key == LogicalKeyboardKey.keyO) {
       appLog('Shortcut', 'O – open folder');
       _pickFolder();
@@ -160,9 +184,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.stacked);
     } else if (key == LogicalKeyboardKey.digit3 &&
                playback.hasFront && playback.hasBack) {
-      appLog('Shortcut', '3 – PIP');
-      ref.read(layoutConfigProvider.notifier).state =
-          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.pip);
+      final config = ref.read(layoutConfigProvider);
+      if (config.mode != LayoutMode.pip) {
+        appLog('Shortcut', '3 – PIP (front main)');
+        ref.read(layoutConfigProvider.notifier).state =
+            config.copyWith(mode: LayoutMode.pip, pipPrimary: PipPrimary.front);
+      } else {
+        // Already PIP — swap primary
+        final next = config.pipPrimary == PipPrimary.front
+            ? PipPrimary.back
+            : PipPrimary.front;
+        appLog('Shortcut', '3 – PIP swap → ${next.name} main');
+        ref.read(layoutConfigProvider.notifier).state =
+            config.copyWith(pipPrimary: next);
+      }
     } else if (key == LogicalKeyboardKey.keyR) {
       appLog('Shortcut', 'R – toggle sort order');
       final current = ref.read(sortOrderProvider);
@@ -178,16 +213,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.keyE && playback.isLoaded) {
       appLog('Shortcut', 'E – export');
       _confirmExport();
-    } else if (key == LogicalKeyboardKey.keyC) {
-      appLog('Shortcut', 'C – toggle clip list');
-      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
-        Navigator.of(context).pop();
-      } else {
-        _scaffoldKey.currentState?.openDrawer();
-      }
-    } else if (key == LogicalKeyboardKey.keyI) {
-      appLog('Shortcut', 'I – about');
-      _showAbout();
     } else if (key == LogicalKeyboardKey.keyW) {
       appLog('Shortcut', 'W – close folder');
       _confirmCloseFolder();
@@ -461,6 +486,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ? 'Exported to $savePath'
             : 'Export failed — is FFmpeg installed?'),
         duration: const Duration(seconds: 5),
+        showCloseIcon: true,
+        closeIconColor: Colors.white54,
         action: exportOk
             ? SnackBarAction(
                 label: 'Open folder',
@@ -473,14 +500,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _showAbout() {
-    final box = context.findRenderObject() as RenderBox?;
-    // Find the about icon position — use a fallback top-right
-    // We'll show it near top-right of the screen
-    final screenSize = MediaQuery.of(context).size;
-    _showAboutPopupAt(
-      context,
-      Rect.fromLTWH(screenSize.width - 60, 36, 30, 30),
-    );
+    setState(() => _aboutOpen = !_aboutOpen);
   }
 
   Future<void> _saveClip() async {
@@ -585,6 +605,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     clipCount:          pairs.length,
                     isFullscreen:       _isFullscreen,
                     onToggleFullscreen: _toggleFullscreen,
+                    onAbout:            _showAbout,
                   )
                 : const SizedBox.shrink(),
           ),
@@ -604,6 +625,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               child: Stack(children: [
                 const DualVideoView(),
                 if (pairs.isEmpty) _EmptyState(onOpen: _pickFolder),
+                // About overlay — rendered in-widget so I key toggle works
+                if (_aboutOpen)
+                  GestureDetector(
+                    onTap: () => setState(() => _aboutOpen = false),
+                    child: Container(
+                      color: Colors.black38,
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.only(top: 8, right: 8),
+                      child: GestureDetector(
+                        onTap: () {}, // absorb taps on the panel
+                        child: const _AboutPanel(),
+                      ),
+                    ),
+                  ),
               ]),
             ),
           ),
@@ -639,10 +674,12 @@ class _MinimalTopBar extends StatelessWidget {
   final int          clipCount;
   final bool         isFullscreen;
   final VoidCallback onToggleFullscreen;
+  final VoidCallback? onAbout;
   const _MinimalTopBar({
     required this.clipCount,
     required this.isFullscreen,
     required this.onToggleFullscreen,
+    this.onAbout,
   });
 
   @override
@@ -678,21 +715,14 @@ class _MinimalTopBar extends StatelessWidget {
           ),
         ],
         const Spacer(),
-        Builder(
-          builder: (ctx) => Tooltip(
-            message: 'About',
-            child: IconButton(
-              icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
-              onPressed: () {
-                final box = ctx.findRenderObject() as RenderBox;
-                final pos = box.localToGlobal(Offset.zero);
-                _showAboutPopupAt(ctx,
-                    Rect.fromLTWH(pos.dx, pos.dy, box.size.width, box.size.height));
-              },
-              iconSize: 18,
-              padding: const EdgeInsets.all(6),
-              constraints: const BoxConstraints(),
-            ),
+        Tooltip(
+          message: 'About (I)',
+          child: IconButton(
+            icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
+            onPressed: onAbout,
+            iconSize: 18,
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(),
           ),
         ),
         const SizedBox(width: 2),
@@ -718,103 +748,80 @@ class _MinimalTopBar extends StatelessWidget {
 
 }
 
-void _showAboutPopupAt(BuildContext context, Rect anchorRect) {
-    final screenW = MediaQuery.of(context).size.width;
-    const popupW = 320.0;
+// ─── About panel (in-widget overlay, not a dialog) ───────────────────────────
 
-    // Align right edge with icon, clamp to screen
-    double left = anchorRect.right - popupW;
-    left = left.clamp(8.0, screenW - popupW - 8);
+class _AboutPanel extends StatelessWidget {
+  const _AboutPanel();
 
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'About',
-      barrierColor: Colors.black26,
-      transitionDuration: const Duration(milliseconds: 150),
-      transitionBuilder: (ctx, anim, _, child) {
-        return FadeTransition(
-          opacity: anim,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, -0.05),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
-            child: child,
-          ),
-        );
-      },
-      pageBuilder: (ctx, _, __) {
-        return Stack(
-          children: [
-            Positioned(
-              left: left,
-              top: anchorRect.bottom + 4,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: popupW,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E1E1E),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(children: [
-                        Icon(Icons.videocam_rounded, color: Color(0xFF4FC3F7), size: 22),
-                        SizedBox(width: 8),
-                        Text('Dashcam Player',
-                          style: TextStyle(color: Colors.white, fontSize: 15,
-                              fontWeight: FontWeight.w600)),
-                      ]),
-                      const SizedBox(height: 4),
-                      const Text('Version 1.2.0',
-                        style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
-                      const SizedBox(height: 12),
-                      const Text('Features',
-                        style: TextStyle(color: Colors.white70, fontSize: 12,
-                            fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 6),
-                      const _AboutFeature(Icons.folder_open_rounded, 'Auto-detect front & back camera folders'),
-                      const _AboutFeature(Icons.play_circle_outline_rounded, 'Synchronized dual-camera playback'),
-                      const _AboutFeature(Icons.view_quilt_rounded, 'Side-by-side, Stacked & PIP layouts'),
-                      const _AboutFeature(Icons.picture_in_picture_rounded, 'Draggable & resizable PIP overlay'),
-                      const _AboutFeature(Icons.speed_rounded, 'Variable speed playback (0.25x-5x)'),
-                      const _AboutFeature(Icons.map_rounded, 'Live GPS tracking & interactive map'),
-                      const _AboutFeature(Icons.movie_creation_rounded, 'Export composed videos via FFmpeg'),
-                      const _AboutFeature(Icons.save_rounded, 'Batch save / copy clips'),
-                      const _AboutFeature(Icons.sync_rounded, 'Audio sync offset adjustment'),
-                      const _AboutFeature(Icons.keyboard_rounded, 'Full keyboard shortcut support'),
-                      const _AboutFeature(Icons.fullscreen_rounded, 'Fullscreen & wakelock'),
-                      const SizedBox(height: 10),
-                      const Text('Built with Flutter & media_kit',
-                        style: TextStyle(color: Colors.white38, fontSize: 10)),
-                    ],
-                  ),
-                ),
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 340,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white10),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 24, offset: const Offset(0, 8)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4FC3F7).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
               ),
+              child: const Icon(Icons.videocam_rounded,
+                  color: Color(0xFF4FC3F7), size: 24),
             ),
-          ],
-        );
-      },
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('DashCam Player',
+                    style: TextStyle(color: Colors.white, fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+                Text('v1.2.0  \u00b7  Desktop',
+                    style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
+              ],
+            ),
+          ]),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 14),
+          const _Af(Icons.play_circle_outline_rounded, 'Synchronized dual-camera playback'),
+          const _Af(Icons.view_quilt_rounded, 'Side-by-side, Stacked & PIP layouts'),
+          const _Af(Icons.picture_in_picture_rounded, 'Draggable & resizable PIP overlay'),
+          const _Af(Icons.speed_rounded, 'Variable speed playback (0.1x \u2013 5x)'),
+          const _Af(Icons.map_rounded, 'GPS & interactive OpenStreetMap'),
+          const _Af(Icons.movie_creation_rounded, 'FFmpeg video export & composition'),
+          const _Af(Icons.save_alt_rounded, 'Batch save clips with progress'),
+          const _Af(Icons.sync_rounded, 'Manual audio sync offset (\u00b15s)'),
+          const _Af(Icons.keyboard_rounded, '20+ keyboard shortcuts'),
+          const SizedBox(height: 14),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 10),
+          const Text('Built with Flutter & media_kit',
+              style: TextStyle(color: Colors.white30, fontSize: 10)),
+          const Text('Press I to close',
+              style: TextStyle(color: Colors.white24, fontSize: 10)),
+        ],
+      ),
     );
   }
+}
 
-class _AboutFeature extends StatelessWidget {
+class _Af extends StatelessWidget {
   final IconData icon;
   final String text;
-  const _AboutFeature(this.icon, this.text);
+  const _Af(this.icon, this.text);
 
   @override
   Widget build(BuildContext context) {
@@ -822,15 +829,15 @@ class _AboutFeature extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(children: [
         Icon(icon, color: const Color(0xFF4FC3F7), size: 14),
-        const SizedBox(width: 8),
+        const SizedBox(width: 10),
         Expanded(child: Text(text,
-          style: const TextStyle(color: Colors.white60, fontSize: 12))),
+            style: const TextStyle(color: Colors.white60, fontSize: 12))),
       ]),
     );
   }
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
+// ─── Landing page (empty state) ─────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onOpen;
@@ -840,93 +847,152 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.videocam_outlined, color: Colors.white24, size: 64),
-        const SizedBox(height: 14),
-        const Text('Select your dashcam SD card or folder',
-          style: TextStyle(color: Colors.white54, fontSize: 15)),
-        const SizedBox(height: 6),
-        const Text('Expects video_front & video_back folders inside',
-          style: TextStyle(color: Colors.white24, fontSize: 12)),
-        const SizedBox(height: 24),
-        ElevatedButton.icon(
-          onPressed: onOpen,
-          icon:  const Icon(Icons.folder_open_rounded),
-          label: const Text('Open Drive / Folder'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF4FC3F7),
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          // App branding
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF4FC3F7).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.videocam_rounded,
+                color: Color(0xFF4FC3F7), size: 52),
           ),
-        ),
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
+          const SizedBox(height: 18),
+          const Text('DashCam Player',
+              style: TextStyle(color: Colors.white, fontSize: 22,
+                  fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+          const SizedBox(height: 6),
+          const Text('Dual-camera dashcam video player & exporter',
+              style: TextStyle(color: Colors.white38, fontSize: 13)),
+          const SizedBox(height: 28),
+
+          // Open button
+          ElevatedButton.icon(
+            onPressed: onOpen,
+            icon: const Icon(Icons.folder_open_rounded, size: 20),
+            label: const Text('Open Dashcam Folder',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4FC3F7),
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
           ),
-          child: const Column(children: [
-            _ShortcutRow('Space',    'Play / Pause'),
-            _ShortcutRow('← →',     'Seek ±10 seconds'),
-            _ShortcutRow('Shift+.',  'Next clip'),
-            _ShortcutRow('Shift+,',  'Previous clip'),
-            _ShortcutRow('F',        'Mute (single) / Front (paired)'),
-            _ShortcutRow('B',        'Mute back (paired)'),
-            _ShortcutRow('C',        'Clip list'),
-            _ShortcutRow('M',        'Toggle map sidebar'),
-            _ShortcutRow('O',        'Open folder'),
-            _ShortcutRow('S',        'Save clips'),
-            _ShortcutRow('E',        'Export video'),
-            _ShortcutRow('L',        'Change layout'),
-            _ShortcutRow('1 / 2 / 3','Side by side / Stacked / PIP'),
-            _ShortcutRow('[ / ]',    'Decrease / increase speed'),
-            _ShortcutRow('\\',       'Reset speed to 1x'),
-            _ShortcutRow('R',        'Toggle sort order'),
-            _ShortcutRow('W',        'Close folder'),
-            _ShortcutRow('Q',        'Quit application'),
-            _ShortcutRow('I',        'About'),
-            _ShortcutRow('Shift',    'Toggle fullscreen'),
-          ]),
-        ),
-      ]),
+          const SizedBox(height: 8),
+          const Text('Supports video_front / video_back folder structure',
+              style: TextStyle(color: Colors.white24, fontSize: 11)),
+
+          const SizedBox(height: 32),
+
+          // Shortcuts in multi-column grid
+          Container(
+            constraints: const BoxConstraints(maxWidth: 640),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+            ),
+            child: Column(children: [
+              const Text('KEYBOARD SHORTCUTS',
+                  style: TextStyle(color: Colors.white24, fontSize: 10,
+                      fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Column 1: Playback
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sectionLabel('Playback'),
+                      _kb('Space', 'Play / Pause'),
+                      _kb('\u2190 \u2192', 'Seek \u00b110s'),
+                      _kb('Shift+.', 'Next clip'),
+                      _kb('Shift+,', 'Previous clip'),
+                      _kb('[ / ]', 'Speed down / up'),
+                      _kb('\\', 'Reset speed 1x'),
+                      const SizedBox(height: 10),
+                      _sectionLabel('Audio'),
+                      _kb('F', 'Mute front'),
+                      _kb('B', 'Mute back'),
+                    ],
+                  )),
+                  const SizedBox(width: 16),
+                  // Column 2: View & Layout
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sectionLabel('Layout'),
+                      _kb('1', 'Side by side'),
+                      _kb('2', 'Stacked'),
+                      _kb('3', 'PIP (toggle primary)'),
+                      _kb('L', 'Layout popup'),
+                      _kb('Shift', 'Fullscreen'),
+                      const SizedBox(height: 10),
+                      _sectionLabel('Panels'),
+                      _kb('C', 'Clip list'),
+                      _kb('M', 'Map sidebar'),
+                      _kb('I', 'About'),
+                    ],
+                  )),
+                  const SizedBox(width: 16),
+                  // Column 3: File operations
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sectionLabel('File'),
+                      _kb('O', 'Open folder'),
+                      _kb('S', 'Save clips'),
+                      _kb('E', 'Export video'),
+                      _kb('W', 'Close folder'),
+                      _kb('R', 'Toggle sort'),
+                      const SizedBox(height: 10),
+                      _sectionLabel('App'),
+                      _kb('Q', 'Quit'),
+                      _kb('Esc', 'Close overlay'),
+                    ],
+                  )),
+                ],
+              ),
+            ]),
+          ),
+        ]),
       ),
     );
   }
-}
 
-class _ShortcutRow extends StatelessWidget {
-  final String keyLabel;
-  final String label;
-  const _ShortcutRow(this.keyLabel, this.label);
+  static Widget _sectionLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(text,
+        style: const TextStyle(color: Colors.white30, fontSize: 10,
+            fontWeight: FontWeight.w600, letterSpacing: 0.8)),
+  );
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(
-          width: 100,
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: Colors.white10,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Text(keyLabel,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white60, fontSize: 11)),
-            ),
-          ),
+  static Widget _kb(String key, String label) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(children: [
+      Container(
+        constraints: const BoxConstraints(minWidth: 42),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
-        const SizedBox(width: 10),
-        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-      ]),
-    );
-  }
+        child: Text(key, textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white54, fontSize: 10,
+                fontFamily: 'monospace')),
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Text(label,
+          style: const TextStyle(color: Colors.white30, fontSize: 11))),
+    ]),
+  );
 }
 
 // ─── Save clip dialog ────────────────────────────────────────────────────────

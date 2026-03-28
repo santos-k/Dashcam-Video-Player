@@ -418,6 +418,8 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             : 'Export failed — is FFmpeg installed?'),
         duration: const Duration(seconds: 5),
         behavior: SnackBarBehavior.floating,
+        showCloseIcon: true,
+        closeIconColor: Colors.white54,
         action: ok
             ? SnackBarAction(
                 label: 'Open folder',
