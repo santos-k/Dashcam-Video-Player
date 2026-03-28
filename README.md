@@ -1,211 +1,197 @@
-# [DashCam Player — Flutter App](https://santos-k.github.io/Dashcam-Video-Player/)
- 
-Live at: https://santos-k.github.io/Dashcam-Video-Player/
-A cross-platform Flutter app (Windows, Android, iOS) that plays paired dashcam
-front/back videos side-by-side with full sync controls and export capability.
+# [DashCam Player](https://santos-k.github.io/Dashcam-Video-Player/)
+
+A cross-platform Flutter desktop app that plays paired dashcam front/back videos side by side with synchronized controls, variable speed playback, GPS map integration, and FFmpeg-powered video export.
+
+**Live site:** https://santos-k.github.io/Dashcam-Video-Player/
+
+![DashCam Player - Side by side view](assets/screenshots/side_by_side.png)
 
 ---
 
 ## Features
 
-| Feature | Status |
+| Feature | Details |
 |---|---|
-| Dual video playback (front + back, side by side) | ✅ |
-| Automatic F/B file pairing by timestamp | ✅ |
-| Next/previous clip navigation | ✅ |
-| Manual sync slider (±5 s) | ✅ |
-| Side-by-side, stacked, and PIP layouts | ✅ |
-| PIP: choose primary video & corner | ✅ |
-| Export composed video via FFmpeg | ✅ |
-| Responsive layout (portrait + landscape) | ✅ |
-| Windows, Android, iOS | ✅ |
+| Dual video playback | Front + back cameras synced side by side |
+| Auto file pairing | Matches by timestamp (±5s tolerance) from video_front/video_back folders or F/B filename suffixes |
+| 3 layout modes | Side-by-side, Stacked, Picture-in-Picture (key 1/2/3) |
+| PIP controls | Draggable, resizable overlay with position memory. Key 3 toggles primary camera |
+| Variable speed | 11 levels from 0.1x to 5x. Speed persists across clips. Keys [ ] \ |
+| Sync offset | ±5000ms slider to compensate for recording start differences |
+| GPS & Map | Interactive OpenStreetMap sidebar with device location, tile layers, Google Maps link |
+| FFmpeg export | Export composed videos in any layout with H.264. Sync offset applied automatically |
+| Batch save | Select multiple clips, real-time progress counter (e.g. "2/6 saved") |
+| Audio control | Independent front/back mute (F/B keys) |
+| Smart UI | Auto-hide controls after 5s inactivity, video fills full screen |
+| 20+ shortcuts | Full keyboard control for every feature |
+| Fullscreen | Shift key toggles fullscreen with wakelock |
 
 ---
 
-## Project structure
+## Keyboard Shortcuts
+
+### Playback
+| Key | Action |
+|---|---|
+| `Space` | Play / Pause |
+| `← →` | Seek ±10 seconds |
+| `Shift+.` | Next clip |
+| `Shift+,` | Previous clip |
+| `[ ]` | Decrease / increase speed |
+| `\` | Reset speed to 1x |
+
+### Layout & View
+| Key | Action |
+|---|---|
+| `1` | Side by side |
+| `2` | Stacked |
+| `3` | PIP (toggle primary camera) |
+| `L` | Layout popup |
+| `Shift` | Toggle fullscreen |
+
+### Panels
+| Key | Action |
+|---|---|
+| `C` | Toggle clip list |
+| `M` | Toggle map sidebar |
+| `I` | Toggle about |
+| `Esc` | Close overlay |
+
+### Audio
+| Key | Action |
+|---|---|
+| `F` | Mute front (or single camera) |
+| `B` | Mute back camera |
+
+### File Operations
+| Key | Action |
+|---|---|
+| `O` | Open dashcam folder |
+| `S` | Save clips to folder |
+| `E` | Export composed video |
+| `W` | Close folder |
+| `R` | Toggle sort order |
+| `Q` | Quit application |
+
+---
+
+## Project Structure
 
 ```
 lib/
-  main.dart                      ← App entry point (ProviderScope + MaterialApp)
+  main.dart                      App entry point (ProviderScope + MaterialApp)
   models/
-    video_pair.dart              ← VideoPair data class
-    layout_config.dart           ← LayoutMode / PipPrimary / PipCorner enums + config
+    video_pair.dart              VideoPair data class
+    layout_config.dart           LayoutMode / PipPrimary / alignment enums
   providers/
-    app_providers.dart           ← All Riverpod providers & notifiers
+    app_providers.dart           All Riverpod providers & notifiers
   utils/
-    file_pairer.dart             ← F/B file matching logic
+    file_pairer.dart             F/B file matching logic
   services/
-    export_service.dart          ← FFmpeg export (side-by-side / stacked / PIP)
+    export_service.dart          FFmpeg export (side-by-side / stacked / PIP)
+    log_service.dart             File-based logging
   screens/
-    player_screen.dart           ← Main screen
+    player_screen.dart           Main screen with all keyboard shortcuts
   widgets/
-    dual_video_view.dart         ← Renders the two VideoPlayer widgets
-    playback_controls.dart       ← Transport bar + sync slider
-    layout_selector.dart         ← Bottom sheet for layout/PIP options
-    clip_list_drawer.dart        ← Side drawer listing all pairs
+    dual_video_view.dart         Renders the two video players
+    playback_controls.dart       Transport bar, speed, sync, export, save
+    layout_selector.dart         Layout & PIP options popup
+    clip_list_drawer.dart        Side drawer listing all pairs
+    map_dialog.dart              OpenStreetMap sidebar with GPS
 ```
 
 ---
 
-## Step 1 — Install Flutter
+## Getting Started
 
-1. Download the Flutter SDK from https://docs.flutter.dev/get-started/install
-2. Add `flutter/bin` to your PATH.
-3. Run `flutter doctor` and resolve any issues.
-4. Install platform tools:
-   - **Android**: Android Studio + Android SDK (API 33+)
-   - **iOS**: Xcode 15+ (macOS only)
-   - **Windows**: Visual Studio 2022 with "Desktop development with C++"
+### Requirements
 
----
+- **Windows 10+** (64-bit x64)
+- **Flutter SDK** 3.0+ ([install](https://docs.flutter.dev/get-started/install))
+- **Visual Studio 2022** with "Desktop development with C++" workload
+- **FFmpeg** on PATH (optional, for video export only — [download](https://ffmpeg.org/download.html))
 
-## Step 2 — Create the project
-
-```bash
-flutter create dashcam_player
-cd dashcam_player
-```
-
-Replace the generated files with the source files in this repository.
-
----
-
-## Step 3 — Install dependencies
+### Run from Source
 
 ```bash
 flutter pub get
+flutter run -d windows
 ```
 
-Key packages used:
-- `video_player` — platform video playback
-- `flutter_riverpod` — state management
-- `file_picker` — folder/file selection dialog
-- `ffmpeg_kit_flutter_full_gpl` — video export/compositing
-- `permission_handler` — runtime permissions (Android/iOS)
-- `wakelock_plus` — prevent screen sleep during playback
-- `share_plus` — share exported file
-
----
-
-## Step 4 — Platform configuration
-
-### Android
-
-Edit `android/app/src/main/AndroidManifest.xml`:
-- Add the permissions from `android_permissions_snippet.xml`
-- Add the FileProvider entry for share_plus
-
-Set minimum SDK to 21 in `android/app/build.gradle`:
-```gradle
-defaultConfig {
-    minSdkVersion 21
-    targetSdkVersion 34
-}
-```
-
-### iOS
-
-Edit `ios/Runner/Info.plist`:
-- Add the keys from `ios_info_plist_snippet.xml`
-
-In `ios/Podfile`, set the minimum iOS version:
-```ruby
-platform :ios, '14.0'
-```
-
-Run `pod install` in the `ios/` directory.
-
-### Windows
-
-No manifest changes needed for development builds.
-See `windows_notes.txt` for MSIX distribution.
-
----
-
-## Step 5 — Dashcam file naming
-
-The app expects files named:
-
-```
-<timestamp>F.<ext>   ← front camera
-<timestamp>B.<ext>   ← back camera
-```
-
-Supported formats:
-- `20240315_143022F.mp4` + `20240315_143022B.mp4`
-- `2024-03-15_14-30-22F.MP4` + `2024-03-15_14-30-22B.MP4`
-- `20240315143022F.avi` + `20240315143022B.avi`
-
-Both files must be in the **same folder**, or you can use
-`FilePairer.pairFromTwoDirectories()` if they are in separate front/back folders.
-
----
-
-## Step 6 — Run the app
+### Build Release
 
 ```bash
-# Android (USB debugging enabled)
-flutter run -d android
-
-# iOS (physical device or simulator)
-flutter run -d ios
-
-# Windows desktop
-flutter run -d windows
-
-# Debug in Chrome (no video playback — web not supported for this app)
-# NOT recommended
+flutter build windows --release
 ```
 
----
+Output: `build/windows/x64/runner/Release/`
 
-## Step 7 — Using the app
+### Windows Installer
 
-1. Tap the **folder icon** (top right) to open a dashcam folder.
-2. The app automatically pairs F/B files and loads the first pair.
-3. Use **Play/Pause** and the **seek bar** to control playback.
-4. **⏮ / ⏭** skip to the previous/next pair.
-5. Tap **Sync** to reveal the offset slider. Drag to compensate for recording
-   start differences (±5 seconds range).
-6. Tap the **layout icon** to switch between side-by-side, stacked, and PIP.
-   In PIP mode, choose which video is primary and which corner the overlay sits in.
-7. Tap the **share icon** to export the current pair as a composited MP4.
-   The export uses FFmpeg and may take 1–5× the clip duration.
-8. Open the **hamburger menu** to see all loaded clips and jump to any pair.
+Build the installer with [InnoSetup](https://jrsoftware.org/isinfo.php) using `installer.iss`.
 
 ---
 
-## Sync slider — how it works
+## Dashcam File Structure
+
+The app supports two folder layouts:
+
+**Separate directories** (preferred):
+```
+SD_Card/
+  video_front/          Normal front clips
+  video_back/           Normal back clips
+  video_front_lock/     Protected front clips
+  video_back_lock/      Protected back clips
+```
+
+**Single directory with suffixes:**
+```
+Folder/
+  20240315_143022F.mp4    Front camera
+  20240315_143022B.mp4    Back camera
+```
+
+Supported formats: `.mp4`, `.ts`, `.avi`, `.mkv`
+
+---
+
+## Sync Offset
 
 The slider range is **−5000 ms to +5000 ms**.
 
-- **Positive offset** (+N ms) means the **front video starts N ms later** than
-  the back. The app seeks the back video forward by N ms so both appear at the
-  same real-world moment.
-- **Negative offset** (−N ms) means the **back video starts N ms later**.
-  The front is seeked forward instead.
+- **Positive offset** (+N ms): front video starts N ms later than back. The app seeks back forward to align.
+- **Negative offset** (−N ms): back video starts N ms later. Front is seeked forward.
 
-During export, `ffmpeg_kit` applies `-itsoffset` to compensate, so the
-exported file is always in sync regardless of original offset.
+During export, FFmpeg applies `-itsoffset` to match.
 
 ---
 
-## Adding your own layout
+## Adding a New Layout Mode
 
-1. Add a new value to `LayoutMode` in `models/layout_config.dart`.
-2. Handle it in `DualVideoView._build()` switch statement.
-3. Add a filter graph case to `ExportService._buildFilterGraph()`.
-4. Add a chip in `_LayoutSheet` in `widgets/layout_selector.dart`.
+1. Add a value to `LayoutMode` in `models/layout_config.dart`
+2. Handle it in `DualVideoView` switch statement
+3. Add FFmpeg filter graph case in `ExportService._buildFilterGraph()`
+4. Add UI option in `widgets/layout_selector.dart`
 
 ---
 
-## Known limitations
+## Tech Stack
 
-- **Web** is not supported — `video_player` and `ffmpeg_kit` require native
-  platform APIs.
-- **Export progress** is estimated (assumes 5-minute clip max). The FFmpeg
-  statistics API does not expose total duration.
-- **PIP drag-to-reposition** is not implemented (corner selection only).
-  Adding `Draggable` + `DragTarget` around the PIP widget is straightforward.
-- **Audio** from the back camera is discarded in the exported file. Extend
-  `ExportService` with `-map 1:a?` if you need it.
+- **Flutter 3.0+** — Cross-platform desktop UI
+- **media_kit** — Video playback (replaces deprecated video_player)
+- **flutter_riverpod** — Reactive state management
+- **flutter_map** + **latlong2** — Interactive OpenStreetMap
+- **window_manager** — Desktop window control
+- **FFmpeg** — Video composition & export (system CLI)
+
+---
+
+## Version History
+
+| Version | Highlights |
+|---|---|
+| 1.2.0 | Variable speed (0.1x–5x), redesigned landing page, auto-hide controls, save progress, toggle shortcuts, PIP primary swap, instant quit |
+| 1.1.1 | PIP bounds fix, shortcuts overhaul, export improvements, About popup, landing page |
+| 1.1.0 | Interactive map sidebar, ref-after-dispose fix |
+| 1.0.0 | Initial release: dual playback, sync, export, PIP |
