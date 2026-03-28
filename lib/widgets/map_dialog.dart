@@ -1,41 +1,66 @@
 // lib/widgets/map_dialog.dart
 //
-// Shows GPS coordinates for the current clip in a sidebar (endDrawer) with
-// an embedded OpenStreetMap tile preview.  Defaults to India when no GPS
-// data is available.  The user can open the location in a browser.
+// Interactive OpenStreetMap sidebar with coordinate input, search, zoom/pan,
+// multiple tile layers, and browser-open buttons.  State (coordinates, zoom,
+// tile layer) is persisted via Riverpod so it survives open/close cycles.
 
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../providers/app_providers.dart';
 import '../services/export_service.dart';
+import '../services/log_service.dart';
 
 // Default: centre of India
-const double _defaultLat = 20.5937;
-const double _defaultLon = 78.9629;
-const int    _defaultZoom = 5;
-const int    _coordZoom   = 15;
+const double _defaultLat  = 20.5937;
+const double _defaultLon  = 78.9629;
+const double _defaultZoom = 5;
+const double _coordZoom   = 15;
+const double _minWidth    = 280;
+const double _maxWidth    = 600;
 
-class MapSidebar extends StatefulWidget {
+class MapSidebar extends ConsumerStatefulWidget {
   final String? videoPath;
   final VoidCallback? onClose;
   const MapSidebar({super.key, this.videoPath, this.onClose});
 
   @override
-  State<MapSidebar> createState() => _MapSidebarState();
+  ConsumerState<MapSidebar> createState() => _MapSidebarState();
 }
 
-class _MapSidebarState extends State<MapSidebar> {
+class _MapSidebarState extends ConsumerState<MapSidebar> {
   final _latCtrl = TextEditingController();
   final _lonCtrl = TextEditingController();
-  bool _loading  = false;
+  final _mapController = MapController();
+
+  bool    _loading = false;
   String? _error;
-  bool _hasCoords = false;
+  double  _width   = 340;
+
+  // Marker position (null = no marker)
+  LatLng? _marker;
+
+  static const _tileLayers = [
+    (label: 'Standard', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+    (label: 'Topo',     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
+    (label: 'HOT',      url: 'https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'),
+  ];
 
   @override
   void initState() {
     super.initState();
-    if (widget.videoPath != null) {
+    // Restore persisted state
+    final saved = ref.read(mapStateProvider);
+    if (saved.lat != null && saved.lon != null) {
+      _latCtrl.text = saved.lat!.toStringAsFixed(6);
+      _lonCtrl.text = saved.lon!.toStringAsFixed(6);
+      _marker = LatLng(saved.lat!, saved.lon!);
+    }
+    // Auto-extract GPS only on first open (when no saved coords)
+    if (saved.lat == null && widget.videoPath != null) {
       _tryExtractGPS();
     }
   }
@@ -50,9 +75,35 @@ class _MapSidebarState extends State<MapSidebar> {
 
   @override
   void dispose() {
+    // Persist is handled via onClose / close button; ref is already invalid
+    // during dispose, so we only clean up controllers here.
     _latCtrl.dispose();
     _lonCtrl.dispose();
+    _mapController.dispose();
     super.dispose();
+  }
+
+  /// Save current state to provider so it survives sidebar close/reopen.
+  /// Must be called while the widget is still mounted (not from dispose).
+  void _persist() {
+    if (!mounted) return;
+    try {
+      final cam = _mapController.camera;
+      ref.read(mapStateProvider.notifier).state = MapState(
+        lat:       _lat,
+        lon:       _lon,
+        zoom:      cam.zoom,
+        tileLayer: ref.read(mapStateProvider).tileLayer,
+      );
+    } catch (_) {
+      // MapController might not be attached yet
+      try {
+        ref.read(mapStateProvider.notifier).state = MapState(
+          lat: _lat,
+          lon: _lon,
+        );
+      } catch (_) {}
+    }
   }
 
   double? get _lat => double.tryParse(_latCtrl.text.trim());
@@ -65,18 +116,56 @@ class _MapSidebarState extends State<MapSidebar> {
     if (coords != null) {
       _latCtrl.text = coords.$1.toStringAsFixed(6);
       _lonCtrl.text = coords.$2.toStringAsFixed(6);
-      _hasCoords = true;
+      _marker = LatLng(coords.$1, coords.$2);
+      _moveToMarker(_coordZoom);
+      appLog('Map', 'GPS extracted: ${coords.$1}, ${coords.$2}');
     } else {
-      _error = 'No GPS data found. Showing India by default.';
-      _hasCoords = false;
+      _error = 'No GPS data found.';
     }
     setState(() => _loading = false);
+  }
+
+  void _searchCoords() {
+    final lat = _lat;
+    final lon = _lon;
+    if (lat == null || lon == null) {
+      setState(() => _error = 'Enter valid coordinates.');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _marker = LatLng(lat, lon);
+    });
+    _moveToMarker(_coordZoom);
+    _persist();
+    appLog('Map', 'Search: $lat, $lon');
+  }
+
+  void _moveToMarker(double zoom) {
+    if (_marker != null) {
+      _mapController.move(_marker!, zoom);
+    }
+  }
+
+  void _zoomIn() {
+    final cam = _mapController.camera;
+    final newZoom = (cam.zoom + 1).clamp(2.0, 18.0);
+    // Zoom towards the marker if one exists, otherwise towards center
+    final target = _marker ?? cam.center;
+    _mapController.move(target, newZoom);
+  }
+
+  void _zoomOut() {
+    final cam = _mapController.camera;
+    final newZoom = (cam.zoom - 1).clamp(2.0, 18.0);
+    final target = _marker ?? cam.center;
+    _mapController.move(target, newZoom);
   }
 
   Future<void> _openOSM() async {
     final lat = _lat ?? _defaultLat;
     final lon = _lon ?? _defaultLon;
-    final z   = _hasCoords ? _coordZoom : _defaultZoom;
+    final z   = _marker != null ? _coordZoom.round() : _defaultZoom.round();
     final uri = Uri.parse(
       'https://www.openstreetmap.org/?mlat=$lat&mlon=$lon#map=$z/$lat/$lon');
     if (await canLaunchUrl(uri)) {
@@ -95,273 +184,407 @@ class _MapSidebarState extends State<MapSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    final lat  = _lat ?? _defaultLat;
-    final lon  = _lon ?? _defaultLon;
-    final zoom = _hasCoords ? _coordZoom : _defaultZoom;
+    final saved     = ref.watch(mapStateProvider);
+    final tileLayer = saved.tileLayer;
+
+    final initialCenter = _marker
+        ?? (saved.lat != null && saved.lon != null
+            ? LatLng(saved.lat!, saved.lon!)
+            : const LatLng(_defaultLat, _defaultLon));
+    final initialZoom = _marker != null ? _coordZoom : saved.zoom;
 
     return Drawer(
       backgroundColor: const Color(0xFF121212),
-      width: 340,
+      width: _width,
       child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(16, 16, 8, 12),
-              color: const Color(0xFF1A1A1A),
-              child: Row(children: [
-                const Icon(Icons.map_rounded, color: Color(0xFF4FC3F7), size: 20),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('GPS / Map',
-                    style: TextStyle(color: Colors.white, fontSize: 15,
-                        fontWeight: FontWeight.w600)),
-                ),
-                if (widget.videoPath != null)
-                  IconButton(
-                    icon: const Icon(Icons.refresh_rounded,
-                        color: Colors.white38, size: 18),
-                    onPressed: _loading ? null : _tryExtractGPS,
-                    tooltip: 'Re-extract GPS from video',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded,
-                      color: Colors.white38, size: 18),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    widget.onClose?.call();
-                  },
-                  tooltip: 'Close',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ]),
-            ),
-
-            // Map preview
-            _OsmTileGrid(lat: lat, lon: lon, zoom: zoom),
-
-            // Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_loading)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Center(
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            SizedBox(width: 16, height: 16,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Color(0xFF4FC3F7))),
-                            SizedBox(width: 10),
-                            Text('Extracting GPS...',
-                              style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          ]),
-                        ),
-                      )
-                    else ...[
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Text(_error!,
-                            style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                        ),
-
-                      const Text('Latitude',
-                        style: TextStyle(color: Colors.white54, fontSize: 11)),
-                      const SizedBox(height: 4),
-                      _CoordField(hint: 'e.g. 20.5937', controller: _latCtrl,
-                        onChanged: (_) => setState(() {
-                          _hasCoords = _lat != null && _lon != null;
-                        }),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      const Text('Longitude',
-                        style: TextStyle(color: Colors.white54, fontSize: 11)),
-                      const SizedBox(height: 4),
-                      _CoordField(hint: 'e.g. 78.9629', controller: _lonCtrl,
-                        onChanged: (_) => setState(() {
-                          _hasCoords = _lat != null && _lon != null;
-                        }),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Open map buttons
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _loading ? null : _openOSM,
-                          icon: const Icon(Icons.public_rounded, size: 16),
-                          label: const Text('Open in OpenStreetMap'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4FC3F7),
-                            foregroundColor: Colors.black,
-                            disabledBackgroundColor: Colors.white12,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _loading ? null : _openGoogleMaps,
-                          icon: const Icon(Icons.map_outlined, size: 16),
-                          label: const Text('Open in Google Maps'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4FC3F7),
-                            foregroundColor: Colors.black,
-                            disabledBackgroundColor: Colors.white12,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── OpenStreetMap tile grid ─────────────────────────────────────────────────
-//
-// Renders a 3x3 grid of OSM raster tiles centered on the given coordinates.
-// Each tile is 256x256; the widget shows ~768x768 logical pixels scaled to
-// fit the sidebar width and a fixed height.
-
-class _OsmTileGrid extends StatelessWidget {
-  final double lat;
-  final double lon;
-  final int zoom;
-  const _OsmTileGrid({required this.lat, required this.lon, required this.zoom});
-
-  // Convert lat/lon to tile x/y at the given zoom level (Slippy Map convention).
-  (int, int) _latlonToTile(double lat, double lon, int z) {
-    final n = math.pow(2, z);
-    final x = ((lon + 180) / 360 * n).floor();
-    final latRad = lat * math.pi / 180;
-    final y = ((1 - math.log(math.tan(latRad) + 1 / math.cos(latRad)) / math.pi) / 2 * n).floor();
-    return (x, y);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final (cx, cy) = _latlonToTile(lat, lon, zoom);
-
-    // 3x3 grid around the center tile
-    return Container(
-      height: 220,
-      color: const Color(0xFF1A1A1A),
-      child: ClipRect(
         child: Stack(
           children: [
-            // 3x3 tile grid
-            for (int dy = -1; dy <= 1; dy++)
-              for (int dx = -1; dx <= 1; dx++)
+            Column(
+              children: [
+                    // ─── Header ───────────────────────────
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 4, 8),
+                      color: const Color(0xFF1A1A1A),
+                      child: Row(children: [
+                        const Icon(Icons.map_rounded,
+                            color: Color(0xFF4FC3F7), size: 18),
+                        const SizedBox(width: 6),
+                        const Text('GPS / Map',
+                          style: TextStyle(color: Colors.white, fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        if (widget.videoPath != null)
+                          _IconBtn(
+                            icon: Icons.refresh_rounded,
+                            tooltip: 'Re-extract GPS',
+                            onTap: _loading ? null : _tryExtractGPS,
+                          ),
+                        _IconBtn(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Close (M)',
+                          onTap: () {
+                            _persist();
+                            Navigator.of(context).pop();
+                            widget.onClose?.call();
+                          },
+                        ),
+                      ]),
+                    ),
+
+                    // ─── Coordinate inputs + actions ─────
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      color: const Color(0xFF1A1A1A),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Lat / Lon row
+                          Row(children: [
+                            Expanded(
+                              child: _CoordInput(
+                                label: 'Lat', hint: '20.5937',
+                                controller: _latCtrl,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: _CoordInput(
+                                label: 'Lon', hint: '78.9629',
+                                controller: _lonCtrl,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            // Search
+                            _ActionIcon(
+                              icon: Icons.search_rounded,
+                              tooltip: 'Search coordinates',
+                              onTap: _searchCoords,
+                            ),
+                          ]),
+
+                          if (_loading)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 6),
+                              child: Center(child: SizedBox(width: 14, height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Color(0xFF4FC3F7)))),
+                            )
+                          else ...[
+                            if (_error != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(_error!,
+                                  style: const TextStyle(
+                                      color: Colors.orange, fontSize: 10)),
+                              ),
+                            const SizedBox(height: 6),
+                            // Action row: OSM, GMaps, tile layer
+                            Row(children: [
+                              _ActionChip(
+                                icon: Icons.public_rounded,
+                                label: 'OpenStreetMap',
+                                onTap: _openOSM,
+                              ),
+                              const SizedBox(width: 6),
+                              _ActionChip(
+                                icon: Icons.map_outlined,
+                                label: 'Google Maps',
+                                onTap: _openGoogleMaps,
+                              ),
+                              const Spacer(),
+                              _TileLayerBtn(
+                                currentLayer: tileLayer,
+                                onChanged: (i) {
+                                  ref.read(mapStateProvider.notifier).state =
+                                      saved.copyWith(tileLayer: i);
+                                },
+                              ),
+                            ]),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    // ─── Interactive map ─────────────────
+                    Expanded(
+                      child: FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: initialCenter,
+                          initialZoom: initialZoom,
+                          minZoom: 2,
+                          maxZoom: 18,
+                          interactionOptions: const InteractionOptions(
+                            flags: InteractiveFlag.all,
+                          ),
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate: _tileLayers[tileLayer].url,
+                            subdomains: const ['a', 'b', 'c'],
+                            userAgentPackageName: 'com.dashcam.player',
+                            maxZoom: 18,
+                          ),
+                          // Marker
+                          if (_marker != null)
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: _marker!,
+                                width: 40, height: 40,
+                                alignment: Alignment.topCenter,
+                                child: const Icon(Icons.location_on,
+                                    color: Colors.red, size: 40),
+                              ),
+                            ]),
+                          // Zoom buttons
+                          Align(
+                            alignment: Alignment.bottomRight,
+                            child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _ZoomBtn(icon: Icons.add, onTap: _zoomIn),
+                                  const SizedBox(height: 4),
+                                  _ZoomBtn(icon: Icons.remove, onTap: _zoomOut),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Attribution
+                          const Align(
+                            alignment: Alignment.bottomLeft,
+                            child: Padding(
+                              padding: EdgeInsets.only(left: 4, bottom: 2),
+                              child: Text('\u00A9 OpenStreetMap contributors',
+                                style: TextStyle(
+                                    color: Colors.black54, fontSize: 8)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                // ─── Resize handle (left edge) ──────────
                 Positioned(
-                  left: (dx + 1) * 256.0 - 128 + 170 / 2, // center offset
-                  top:  (dy + 1) * 256.0 - 128 + 110 / 2 - 128,
-                  child: Image.network(
-                    'https://tile.openstreetmap.org/$zoom/${cx + dx}/${cy + dy}.png',
-                    width: 256,
-                    height: 256,
-                    fit: BoxFit.cover,
-                    headers: const {
-                      'User-Agent': 'DashCamPlayer/1.0',
-                    },
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 256, height: 256,
-                      color: const Color(0xFF2A2A2A),
-                      child: const Center(
-                        child: Icon(Icons.cloud_off_rounded,
-                            color: Colors.white24, size: 24)),
+                  left: 0, top: 0, bottom: 0,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.resizeColumn,
+                    child: GestureDetector(
+                      onHorizontalDragUpdate: (d) {
+                        setState(() {
+                          _width = (_width - d.delta.dx).clamp(_minWidth, _maxWidth);
+                        });
+                      },
+                      child: Container(width: 6, color: Colors.transparent),
                     ),
                   ),
                 ),
-
-            // Center pin marker
-            const Center(
-              child: Icon(Icons.location_on,
-                  color: Colors.red, size: 32),
+              ],
             ),
-
-            // Gradient overlay at bottom for visual blend
-            Positioned(
-              left: 0, right: 0, bottom: 0,
-              child: Container(
-                height: 30,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Color(0xFF121212)],
-                  ),
-                ),
-              ),
-            ),
-
-            // OSM attribution
-            Positioned(
-              right: 4, bottom: 2,
-              child: Text('\u00A9 OpenStreetMap',
-                style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.3), fontSize: 8)),
-            ),
-          ],
-        ),
-      ),
-    );
+          ),
+        );
   }
 }
 
-// ─── Coordinate text field ────────────────────────────────────────────────────
+// ─── Compact coordinate input ────────────────────────────────────────────────
 
-class _CoordField extends StatelessWidget {
+class _CoordInput extends StatelessWidget {
+  final String label;
   final String hint;
   final TextEditingController controller;
-  final ValueChanged<String>? onChanged;
-  const _CoordField({
-    required this.hint,
-    required this.controller,
-    this.onChanged,
+  const _CoordInput({
+    required this.label, required this.hint, required this.controller,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
-      controller:  controller,
-      onChanged:   onChanged,
+      controller: controller,
       keyboardType: const TextInputType.numberWithOptions(
           decimal: true, signed: true),
       inputFormatters: [
         FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-+]')),
       ],
-      style: const TextStyle(color: Colors.white70, fontSize: 13),
+      style: const TextStyle(color: Colors.white70, fontSize: 12),
       decoration: InputDecoration(
-        hintText:     hint,
-        hintStyle:    const TextStyle(color: Colors.white24, fontSize: 12),
-        enabledBorder: const OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.white24)),
-        focusedBorder: const OutlineInputBorder(
-          borderSide: BorderSide(color: Color(0xFF4FC3F7))),
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12, vertical: 10),
+        labelText: label, hintText: hint,
+        labelStyle: const TextStyle(color: Colors.white38, fontSize: 10),
+        hintStyle:  const TextStyle(color: Colors.white24, fontSize: 11),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.white24)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFF4FC3F7))),
+      ),
+    );
+  }
+}
+
+// ─── Action icon button (search) ─────────────────────────────────────────────
+
+class _ActionIcon extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _ActionIcon({required this.icon, required this.tooltip, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF4FC3F7),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, size: 18, color: Colors.black),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Action chip button ──────────────────────────────────────────────────────
+
+class _ActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ActionChip({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF4FC3F7).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+                color: const Color(0xFF4FC3F7).withValues(alpha: 0.3)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 13, color: const Color(0xFF4FC3F7)),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(
+                color: Color(0xFF4FC3F7), fontSize: 10,
+                fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Tile layer switcher ─────────────────────────────────────────────────────
+
+class _TileLayerBtn extends StatelessWidget {
+  final int currentLayer;
+  final ValueChanged<int> onChanged;
+  const _TileLayerBtn({required this.currentLayer, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      onSelected: onChanged,
+      tooltip: 'Map style',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      color: const Color(0xFF222222),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      itemBuilder: (_) => [
+        for (var i = 0; i < _MapSidebarState._tileLayers.length; i++)
+          PopupMenuItem(
+            value: i,
+            child: Row(children: [
+              Icon(
+                i == currentLayer ? Icons.check_rounded : Icons.layers_rounded,
+                size: 14,
+                color: i == currentLayer
+                    ? const Color(0xFF4FC3F7) : Colors.white38,
+              ),
+              const SizedBox(width: 8),
+              Text(_MapSidebarState._tileLayers[i].label,
+                style: TextStyle(fontSize: 12,
+                  color: i == currentLayer
+                      ? const Color(0xFF4FC3F7) : Colors.white60)),
+            ]),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.layers_rounded, size: 14, color: Colors.white54),
+          SizedBox(width: 3),
+          Icon(Icons.arrow_drop_down_rounded, size: 14, color: Colors.white38),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Small icon button ───────────────────────────────────────────────────────
+
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  const _IconBtn({required this.icon, required this.tooltip, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(icon, color: Colors.white38, size: 18),
+      onPressed: onTap,
+      tooltip: tooltip,
+      padding: const EdgeInsets.all(4),
+      constraints: const BoxConstraints(),
+      splashRadius: 16,
+    );
+  }
+}
+
+// ─── Zoom button ─────────────────────────────────────────────────────────────
+
+class _ZoomBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _ZoomBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 30, height: 30,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 4, offset: const Offset(0, 1)),
+          ],
+        ),
+        child: Icon(icon, size: 18, color: Colors.black87),
       ),
     );
   }

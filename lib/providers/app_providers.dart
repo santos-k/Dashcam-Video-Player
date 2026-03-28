@@ -341,3 +341,24 @@ final backMutedProvider  = StateProvider<bool>((ref) => false);
 
 // PIP position reset signal
 final pipResetProvider = StateProvider<int>((ref) => 0);
+
+// ─────────────────────────────────────────
+// 11. Persisted map state (survives sidebar open/close)
+// ─────────────────────────────────────────
+
+class MapState {
+  final double? lat;
+  final double? lon;
+  final double  zoom;
+  final int     tileLayer;
+  const MapState({this.lat, this.lon, this.zoom = 5, this.tileLayer = 0});
+  MapState copyWith({double? lat, double? lon, double? zoom, int? tileLayer}) =>
+      MapState(
+        lat:       lat       ?? this.lat,
+        lon:       lon       ?? this.lon,
+        zoom:      zoom      ?? this.zoom,
+        tileLayer: tileLayer ?? this.tileLayer,
+      );
+}
+
+final mapStateProvider = StateProvider<MapState>((ref) => const MapState());

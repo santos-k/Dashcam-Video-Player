@@ -14,7 +14,7 @@ import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
-import '../widgets/map_dialog.dart' show MapSidebar;
+import '../widgets/map_dialog.dart';
 import '../services/log_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -28,6 +28,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _overlayVisible      = true;
   bool _isFullscreen        = false;
   bool _fullscreenTransiting = false;
+  bool _mapSidebarOpen      = false;
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -93,9 +94,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ref.read(backMutedProvider.notifier).state = next;
         notifier.setBackMuted(next);
       } else {
-        // Paired or no video — show map sidebar
-        appLog('Shortcut', 'M – open map sidebar');
-        _openMapSidebar();
+        // Paired or no video — toggle map sidebar
+        _toggleMapSidebar();
       }
     } else if (key == LogicalKeyboardKey.keyO) {
       appLog('Shortcut', 'O – open folder');
@@ -221,8 +221,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _focusNode.requestFocus();
   }
 
-  void _openMapSidebar() {
-    _scaffoldKey.currentState?.openEndDrawer();
+  void _toggleMapSidebar() {
+    if (_mapSidebarOpen) {
+      appLog('Shortcut', 'M – close map sidebar');
+      Navigator.of(context).maybePop();
+      _focusNode.requestFocus();
+    } else {
+      appLog('Shortcut', 'M – open map sidebar');
+      _scaffoldKey.currentState?.openEndDrawer();
+    }
   }
 
   void _closeFolder() {
@@ -307,6 +314,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: Colors.black,
+        onEndDrawerChanged: (open) {
+          _mapSidebarOpen = open;
+          if (!open) _focusNode.requestFocus();
+        },
         drawer: ClipListDrawer(
           onSelect: (i) {
             _goTo(i, autoPlay: true);
@@ -349,7 +360,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                   .then((_) => _focusNode.requestFocus()),
               onSaveClip:     _saveClip,
               onCloseFolder:  _closeFolder,
-              onMap:          _openMapSidebar,
+              onMap:          _toggleMapSidebar,
               focusRequester: _focusNode.requestFocus,
             ),
           ),
