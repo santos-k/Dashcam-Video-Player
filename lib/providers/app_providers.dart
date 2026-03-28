@@ -167,7 +167,18 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   }
 
   Future<void> play() async {
-    appLog('Playback', 'Play');
+    // If the clip has finished, seek to start before playing so we
+    // don't instantly trigger "completed" again.
+    final primary = state.hasFront ? _frontPlayer : _backPlayer;
+    final pos = primary.state.position;
+    final dur = primary.state.duration;
+    if (dur > Duration.zero &&
+        pos >= dur - const Duration(milliseconds: 300)) {
+      appLog('Playback', 'Play (restarting from beginning)');
+      await seekTo(Duration.zero);
+    } else {
+      appLog('Playback', 'Play');
+    }
     await Future.wait([
       if (state.hasFront) _frontPlayer.play(),
       if (state.hasBack)  _backPlayer.play(),

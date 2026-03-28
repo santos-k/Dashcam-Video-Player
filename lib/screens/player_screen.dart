@@ -123,25 +123,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
   }
 
-  Future<void> _toggleFullscreen() async {
+  void _toggleFullscreen() {
     if (_fullscreenTransiting) return; // debounce rapid presses
     _fullscreenTransiting = true;
 
     final next = !_isFullscreen;
     appLog('UI', 'Fullscreen ${next ? "enter" : "exit"}');
-    await windowManager.setFullScreen(next);
-    if (!mounted) { _fullscreenTransiting = false; return; }
+
+    // Update state immediately so the UI reflects the change without
+    // waiting for the window manager.
     setState(() => _isFullscreen = next);
 
-    // Window manager transitions can take a few frames on Windows;
-    // schedule focus restoration with a small delay so the window
-    // finishes resizing before we grab focus.
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (mounted) {
-        _focusNode.requestFocus();
-        setState(() {}); // force rebuild to pick up new size
-      }
-      _fullscreenTransiting = false;
+    // Fire-and-forget: don't await to avoid blocking the UI / video.
+    windowManager.setFullScreen(next).then((_) {
+      // Restore focus after the window finishes resizing.
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) _focusNode.requestFocus();
+        _fullscreenTransiting = false;
+      });
     });
   }
 
