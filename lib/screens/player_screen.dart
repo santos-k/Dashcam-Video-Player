@@ -5,15 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
-import '../services/export_service.dart';
 import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
 import '../widgets/map_dialog.dart';
+import '../services/log_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -23,8 +25,9 @@ class PlayerScreen extends ConsumerStatefulWidget {
 }
 
 class _PlayerScreenState extends ConsumerState<PlayerScreen> {
-  bool _overlayVisible = true;
-  bool _isFullscreen   = false;
+  bool _overlayVisible      = true;
+  bool _isFullscreen        = false;
+  bool _fullscreenTransiting = false;
   final FocusNode _focusNode = FocusNode();
 
   @override
@@ -52,28 +55,56 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final shift    = HardwareKeyboard.instance.isShiftPressed;
 
     if (key == LogicalKeyboardKey.space && playback.isLoaded) {
+      appLog('Shortcut', 'Space – toggle play/pause');
       notifier.togglePlay();
     } else if (key == LogicalKeyboardKey.arrowRight && playback.isLoaded) {
+      appLog('Shortcut', 'Right arrow – seek +10s');
       notifier.seekRelative(const Duration(seconds: 10));
     } else if (key == LogicalKeyboardKey.arrowLeft && playback.isLoaded) {
+      appLog('Shortcut', 'Left arrow – seek -10s');
       notifier.seekRelative(const Duration(seconds: -10));
     } else if (key == LogicalKeyboardKey.period && shift) {
+      appLog('Shortcut', 'Shift+. – next clip');
       _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true);
     } else if (key == LogicalKeyboardKey.comma && shift) {
+      appLog('Shortcut', 'Shift+, – previous clip');
       _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true);
     } else if (key == LogicalKeyboardKey.keyF) {
       final next = !ref.read(frontMutedProvider);
+      appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} front');
       ref.read(frontMutedProvider.notifier).state = next;
       notifier.setFrontMuted(next);
     } else if (key == LogicalKeyboardKey.keyB) {
       final next = !ref.read(backMutedProvider);
+      appLog('Shortcut', 'B – ${next ? "mute" : "unmute"} back');
       ref.read(backMutedProvider.notifier).state = next;
       notifier.setBackMuted(next);
+    } else if (key == LogicalKeyboardKey.keyM && !shift) {
+      // 'M': single-camera mute toggle when unpaired, map when paired or no video
+      if (playback.isLoaded && playback.hasFront && !playback.hasBack) {
+        final next = !ref.read(frontMutedProvider);
+        ref.read(frontMutedProvider.notifier).state = next;
+        notifier.setFrontMuted(next);
+      } else if (playback.isLoaded && playback.hasBack && !playback.hasFront) {
+        final next = !ref.read(backMutedProvider);
+        ref.read(backMutedProvider.notifier).state = next;
+        notifier.setBackMuted(next);
+      } else {
+        // Paired or no video — show map
+        final pairs = ref.read(videoPairListProvider);
+        final index = ref.read(currentIndexProvider);
+        final pair  = pairs.isNotEmpty ? pairs[index] : null;
+        final videoPath = pair?.frontPath ?? pair?.backPath;
+        showMapDialog(context, videoPath).then((_) => _focusNode.requestFocus());
+      }
     } else if (key == LogicalKeyboardKey.keyO) {
+      appLog('Shortcut', 'O – open folder');
       _pickFolder();
     } else if (key == LogicalKeyboardKey.keyL) {
+      appLog('Shortcut', 'L – layout selector');
       showLayoutSelector(context).then((_) => _focusNode.requestFocus());
     } else if (key == LogicalKeyboardKey.keyS) {
+      appLog('Shortcut', 'S – toggle sort order');
       final current = ref.read(sortOrderProvider);
       final next    = current == SortOrder.oldestFirst
           ? SortOrder.newestFirst
@@ -81,33 +112,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ref.read(sortOrderProvider.notifier).state = next;
       ref.read(videoPairListProvider.notifier).applySort(next);
       ref.read(currentIndexProvider.notifier).state = 0;
-    } else if (key == LogicalKeyboardKey.keyM) {
-      final pairs = ref.read(videoPairListProvider);
-      final index = ref.read(currentIndexProvider);
-      final pair  = pairs.isNotEmpty ? pairs[index] : null;
-      final videoPath = pair?.frontPath ?? pair?.backPath;
-      showMapDialog(context, videoPath).then((_) => _focusNode.requestFocus());
+    } else if (key == LogicalKeyboardKey.keyW) {
+      appLog('Shortcut', 'W – close folder');
+      _closeFolder();
     } else if (key == LogicalKeyboardKey.f11 ||
                key == LogicalKeyboardKey.enter) {
+      appLog('Shortcut', '${key == LogicalKeyboardKey.f11 ? "F11" : "Enter"} – toggle fullscreen');
       _toggleFullscreen();
     }
   }
 
   Future<void> _toggleFullscreen() async {
+    if (_fullscreenTransiting) return; // debounce rapid presses
+    _fullscreenTransiting = true;
+
     final next = !_isFullscreen;
+    appLog('UI', 'Fullscreen ${next ? "enter" : "exit"}');
     await windowManager.setFullScreen(next);
-    if (mounted) setState(() => _isFullscreen = next);
+    if (!mounted) { _fullscreenTransiting = false; return; }
+    setState(() => _isFullscreen = next);
+
+    // Window manager transitions can take a few frames on Windows;
+    // schedule focus restoration with a small delay so the window
+    // finishes resizing before we grab focus.
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (mounted) {
+        _focusNode.requestFocus();
+        setState(() {}); // force rebuild to pick up new size
+      }
+      _fullscreenTransiting = false;
+    });
   }
 
   void _goTo(int index, {bool autoPlay = true}) {
     final pairs = ref.read(videoPairListProvider);
     if (index < 0 || index >= pairs.length) return;
+    appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     ref.read(playbackProvider.notifier).loadPair(pairs[index], 0, autoPlay: autoPlay);
   }
 
   void _onClipEnd() {
+    appLog('Playback', 'Clip ended');
     final pairs = ref.read(videoPairListProvider);
     final index = ref.read(currentIndexProvider);
     final next  = index + 1;
@@ -117,6 +164,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   Future<void> _pickFolder() async {
+    appLog('Folder', 'Opening folder picker');
     final result = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Select dashcam drive or folder',
     );
@@ -137,6 +185,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       ));
     }
 
+    appLog('Folder', 'Scanning: $result');
     await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(result));
     if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
@@ -172,52 +221,74 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _focusNode.requestFocus();
   }
 
-  Future<void> _exportAll() async {
+  void _closeFolder() {
+    final pairs = ref.read(videoPairListProvider);
+    if (pairs.isEmpty) return;
+    appLog('Folder', 'Close folder (${pairs.length} clips)');
+    ref.read(playbackProvider.notifier).stop();
+    ref.read(videoPairListProvider.notifier).clear();
+    ref.read(currentIndexProvider.notifier).state = 0;
+    ref.read(syncOffsetProvider.notifier).state = 0;
+    ref.read(frontMutedProvider.notifier).state = false;
+    ref.read(backMutedProvider.notifier).state = false;
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _saveClip() async {
+    appLog('Save', 'Save dialog opened');
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) return;
 
-    // Ask for output directory
+    final currentIdx = ref.read(currentIndexProvider);
+
+    // Show clip-selection dialog
+    final selected = await showDialog<Set<int>>(
+      context: context,
+      builder: (_) => _SaveClipDialog(
+        pairs: pairs,
+        initialSelected: {currentIdx},
+      ),
+    );
+    if (selected == null || selected.isEmpty) {
+      _focusNode.requestFocus();
+      return;
+    }
+
+    // Pick save location
     final outDir = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select folder to save all exported clips',
+      dialogTitle: 'Select folder to save clips',
     );
     if (outDir == null) {
       _focusNode.requestFocus();
       return;
     }
 
-    final layout     = ref.read(layoutConfigProvider);
-    final syncOffset = ref.read(syncOffsetProvider);
+    int copied = 0;
     int failed = 0;
 
-    for (int i = 0; i < pairs.length; i++) {
-      final pair = pairs[i];
-      ref.read(batchExportProvider.notifier).state =
-          BatchExportState(i, pairs.length, 0.0);
-
-      final outputPath = '$outDir${Platform.pathSeparator}dashcam_${pair.id}.mp4';
-      final ok = await ExportService.exportPair(
-        pair:         pair,
-        layout:       layout,
-        syncOffsetMs: syncOffset,
-        outputPath:   outputPath,
-        onProgress: (p) {
-          ref.read(batchExportProvider.notifier).state =
-              BatchExportState(i, pairs.length, p);
-        },
-      );
-      if (!ok) failed++;
+    for (final idx in selected) {
+      final pair = pairs[idx];
+      for (final file in [pair.frontFile, pair.backFile]) {
+        if (file == null) continue;
+        try {
+          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+          await file.copy(dest);
+          copied++;
+        } catch (e) {
+          debugPrint('Copy failed: $e');
+          failed++;
+        }
+      }
     }
 
-    ref.read(batchExportProvider.notifier).state = null;
+    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
     _focusNode.requestFocus();
-
     if (mounted) {
-      final done = pairs.length - failed;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(failed == 0
-            ? 'Exported $done clips to $outDir'
-            : 'Exported $done clips, $failed failed — is FFmpeg installed?'),
-        duration: const Duration(seconds: 5),
+            ? 'Saved $copied file${copied > 1 ? "s" : ""} to $outDir'
+            : 'Saved $copied file(s), $failed failed'),
+        duration: const Duration(seconds: 4),
         action: SnackBarAction(
           label: 'Open folder',
           onPressed: () => Process.run('explorer', [outDir]),
@@ -272,7 +343,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               onFolder:       _pickFolder,
               onLayout:       () => showLayoutSelector(context)
                   .then((_) => _focusNode.requestFocus()),
-              onExportAll:    _exportAll,
+              onSaveClip:     _saveClip,
+              onCloseFolder:  _closeFolder,
               focusRequester: _focusNode.requestFocus,
             ),
           ),
@@ -388,11 +460,12 @@ class _EmptyState extends StatelessWidget {
             _ShortcutRow('← →',     'Seek ±10 seconds'),
             _ShortcutRow('Shift+.', 'Next clip'),
             _ShortcutRow('Shift+,', 'Previous clip'),
-            _ShortcutRow('F / B',   'Mute front / back'),
+            _ShortcutRow('F / B',   'Mute front / back (paired)'),
+            _ShortcutRow('M',       'Mute (single) / Map (paired)'),
             _ShortcutRow('O',       'Open folder'),
             _ShortcutRow('L',       'Change layout'),
             _ShortcutRow('S',       'Toggle sort order'),
-            _ShortcutRow('M',       'Show map / GPS'),
+            _ShortcutRow('W',       'Close folder'),
             _ShortcutRow('F11',     'Toggle fullscreen'),
           ]),
         ),
@@ -424,6 +497,182 @@ class _ShortcutRow extends StatelessWidget {
         const SizedBox(width: 10),
         Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
       ]),
+    );
+  }
+}
+
+// ─── Save clip dialog ────────────────────────────────────────────────────────
+
+class _SaveClipDialog extends StatefulWidget {
+  final List<VideoPair> pairs;
+  final Set<int> initialSelected;
+  const _SaveClipDialog({required this.pairs, required this.initialSelected});
+
+  @override
+  State<_SaveClipDialog> createState() => _SaveClipDialogState();
+}
+
+class _SaveClipDialogState extends State<_SaveClipDialog> {
+  late final Set<int> _selected;
+  final _fmt = DateFormat('MMM d, yyyy  HH:mm:ss');
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = Set.of(widget.initialSelected);
+  }
+
+  int get _totalFiles {
+    int count = 0;
+    for (final idx in _selected) {
+      final p = widget.pairs[idx];
+      if (p.hasFront) count++;
+      if (p.hasBack) count++;
+    }
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 520),
+        child: Column(children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF222222),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.save_alt_rounded, color: Color(0xFF4FC3F7), size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Save Clips',
+                  style: TextStyle(color: Colors.white, fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              ),
+              // Select all / none
+              TextButton(
+                onPressed: () => setState(() {
+                  if (_selected.length == widget.pairs.length) {
+                    _selected.clear();
+                  } else {
+                    _selected.addAll(
+                      List.generate(widget.pairs.length, (i) => i));
+                  }
+                }),
+                child: Text(
+                  _selected.length == widget.pairs.length
+                      ? 'Deselect all'
+                      : 'Select all',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF4FC3F7)),
+                ),
+              ),
+            ]),
+          ),
+
+          // Clip list
+          Expanded(
+            child: ListView.builder(
+              itemCount: widget.pairs.length,
+              itemBuilder: (_, i) {
+                final pair = widget.pairs[i];
+                final checked = _selected.contains(i);
+                final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final badge = pair.isPaired
+                    ? 'F+B'
+                    : pair.hasFront
+                        ? 'F only'
+                        : 'B only';
+                final badgeColor = pair.isPaired
+                    ? const Color(0xFF4FC3F7)
+                    : pair.hasFront
+                        ? Colors.orange
+                        : Colors.purple;
+
+                return CheckboxListTile(
+                  value: checked,
+                  activeColor: const Color(0xFF4FC3F7),
+                  onChanged: (v) => setState(() {
+                    if (v == true) {
+                      _selected.add(i);
+                    } else {
+                      _selected.remove(i);
+                    }
+                  }),
+                  title: Text(
+                    _fmt.format(pair.timestamp),
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  subtitle: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.15),
+                        border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(badge,
+                        style: TextStyle(color: badgeColor, fontSize: 10,
+                            fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('$fileCount file${fileCount > 1 ? "s" : ""}',
+                      style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                    if (pair.isLocked) ...[
+                      const SizedBox(width: 4),
+                      const Text('locked',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                    ],
+                  ]),
+                  dense: true,
+                );
+              },
+            ),
+          ),
+
+          // Footer with save button
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF222222),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+            ),
+            child: Row(children: [
+              Text(
+                '${_selected.length} clip${_selected.length != 1 ? "s" : ""}'
+                ' selected  ($_totalFiles file${_totalFiles != 1 ? "s" : ""})',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('Cancel',
+                    style: TextStyle(color: Colors.white38)),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _selected.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(_selected),
+                icon: const Icon(Icons.save_alt_rounded, size: 16),
+                label: const Text('Save'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4FC3F7),
+                  foregroundColor: Colors.black,
+                  disabledBackgroundColor: Colors.white12,
+                  disabledForegroundColor: Colors.white24,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+              ),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }

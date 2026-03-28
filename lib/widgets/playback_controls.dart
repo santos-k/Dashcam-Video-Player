@@ -15,7 +15,8 @@ class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onNext;
   final VoidCallback  onFolder;
   final VoidCallback  onLayout;
-  final VoidCallback? onExportAll;
+  final VoidCallback? onSaveClip;
+  final VoidCallback? onCloseFolder;
   final VoidCallback? focusRequester;
 
   const PlaybackControls({
@@ -24,7 +25,8 @@ class PlaybackControls extends ConsumerStatefulWidget {
     required this.onNext,
     required this.onFolder,
     required this.onLayout,
-    this.onExportAll,
+    this.onSaveClip,
+    this.onCloseFolder,
     this.focusRequester,
   });
 
@@ -98,33 +100,59 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           const SizedBox(width: 4),
 
-          // Mute front
-          _MuteBtn(
-            label:   'F',
-            tooltip: frontMuted ? 'Unmute front camera (F)' : 'Mute front camera (F)',
-            muted:   frontMuted,
-            onTap: () {
-              final next = !frontMuted;
-              ref.read(frontMutedProvider.notifier).state = next;
-              ref.read(playbackProvider.notifier).setFrontMuted(next);
-              widget.focusRequester?.call();
-            },
-          ),
-          const SizedBox(width: 4),
-
-          // Mute back
-          _MuteBtn(
-            label:   'B',
-            tooltip: backMuted ? 'Unmute back camera (B)' : 'Mute back camera (B)',
-            muted:   backMuted,
-            onTap: () {
-              final next = !backMuted;
-              ref.read(backMutedProvider.notifier).state = next;
-              ref.read(playbackProvider.notifier).setBackMuted(next);
-              widget.focusRequester?.call();
-            },
-          ),
-          const SizedBox(width: 4),
+          // Mute buttons — single button when only one camera, F/B when paired
+          if (playback.hasFront && playback.hasBack) ...[
+            _MuteBtn(
+              label:   'F',
+              tooltip: frontMuted ? 'Unmute front camera (F)' : 'Mute front camera (F)',
+              muted:   frontMuted,
+              onTap: () {
+                final next = !frontMuted;
+                ref.read(frontMutedProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontMuted(next);
+                widget.focusRequester?.call();
+              },
+            ),
+            const SizedBox(width: 4),
+            _MuteBtn(
+              label:   'B',
+              tooltip: backMuted ? 'Unmute back camera (B)' : 'Mute back camera (B)',
+              muted:   backMuted,
+              onTap: () {
+                final next = !backMuted;
+                ref.read(backMutedProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackMuted(next);
+                widget.focusRequester?.call();
+              },
+            ),
+            const SizedBox(width: 4),
+          ] else if (playback.hasFront) ...[
+            _MuteBtn(
+              label:   'Mute',
+              tooltip: frontMuted ? 'Unmute (M)' : 'Mute (M)',
+              muted:   frontMuted,
+              onTap: () {
+                final next = !frontMuted;
+                ref.read(frontMutedProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontMuted(next);
+                widget.focusRequester?.call();
+              },
+            ),
+            const SizedBox(width: 4),
+          ] else if (playback.hasBack) ...[
+            _MuteBtn(
+              label:   'Mute',
+              tooltip: backMuted ? 'Unmute (M)' : 'Mute (M)',
+              muted:   backMuted,
+              onTap: () {
+                final next = !backMuted;
+                ref.read(backMutedProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackMuted(next);
+                widget.focusRequester?.call();
+              },
+            ),
+            const SizedBox(width: 4),
+          ],
 
           // Layout
           _ToolBtn(
@@ -166,12 +194,24 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           const SizedBox(width: 4),
 
-          // Export all clips
-          _ExportAllBtn(
-            enabled:     pairs.isNotEmpty && !isExporting,
-            onExportAll: () {
-              widget.onExportAll?.call();
-              widget.focusRequester?.call();
+          // Save current clip
+          _ToolBtn(
+            icon:    Icons.save_alt_rounded,
+            label:   'Save',
+            tooltip: 'Save current clip files to a folder',
+            onPressed: () {
+              widget.onSaveClip?.call();
+            },
+          ),
+          const SizedBox(width: 4),
+
+          // Close folder
+          _ToolBtn(
+            icon:    Icons.close_rounded,
+            label:   'Close',
+            tooltip: 'Close loaded folder (W)',
+            onPressed: () {
+              widget.onCloseFolder?.call();
             },
           ),
         ]),
@@ -438,64 +478,6 @@ class _ExportBtn extends StatelessWidget {
               isExporting
                   ? '${((progress ?? 0) * 100).round()}%'
                   : 'Export',
-              style: TextStyle(
-                fontSize: 11,
-                color: enabled ? Colors.white60 : Colors.white24,
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Export-all button ────────────────────────────────────────────────────────
-
-class _ExportAllBtn extends ConsumerWidget {
-  final bool         enabled;
-  final VoidCallback onExportAll;
-
-  const _ExportAllBtn({required this.enabled, required this.onExportAll});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final batch = ref.watch(batchExportProvider);
-    final isBatching = batch != null;
-
-    return Tooltip(
-      message: 'Export all clips to a folder',
-      child: GestureDetector(
-        onTap: enabled ? onExportAll : null,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: enabled
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Row(children: [
-            if (isBatching)
-              SizedBox(
-                width: 12, height: 12,
-                child: CircularProgressIndicator(
-                  value:       batch.overallProgress,
-                  strokeWidth: 1.5,
-                  color:       Colors.greenAccent,
-                ),
-              )
-            else
-              Icon(Icons.library_add_outlined,
-                size: 14,
-                color: enabled ? Colors.white60 : Colors.white24),
-            const SizedBox(width: 5),
-            Text(
-              isBatching
-                  ? '${batch.current + 1}/${batch.total}'
-                  : 'Export All',
               style: TextStyle(
                 fontSize: 11,
                 color: enabled ? Colors.white60 : Colors.white24,

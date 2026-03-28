@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
 import '../utils/file_pairer.dart';
+import '../services/log_service.dart';
 
 // ─────────────────────────────────────────
 // 1. Sort order
@@ -28,6 +29,7 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
 
   Future<void> loadFromRoot(Directory root) async {
     final pairs = await FilePairer.pairFromRoot(root);
+    appLog('Folder', 'Loaded ${pairs.length} pairs from ${root.path}');
     _raw  = pairs; // oldest first from pairer
     state = pairs;
   }
@@ -103,6 +105,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
   Future<void> loadPair(VideoPair pair, int syncOffsetMs,
       {bool autoPlay = false}) async {
+    appLog('Playback', 'loadPair: ${pair.id} (front=${pair.hasFront}, back=${pair.hasBack}, offset=$syncOffsetMs, autoPlay=$autoPlay)');
     // Stop both first
     _frontPlayer.pause();
     _backPlayer.pause();
@@ -164,6 +167,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   }
 
   Future<void> play() async {
+    appLog('Playback', 'Play');
     await Future.wait([
       if (state.hasFront) _frontPlayer.play(),
       if (state.hasBack)  _backPlayer.play(),
@@ -172,6 +176,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   }
 
   Future<void> pause() async {
+    appLog('Playback', 'Pause');
     await Future.wait([
       _frontPlayer.pause(),
       _backPlayer.pause(),
@@ -219,6 +224,17 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     }
 
     if (wasPlaying) await play();
+  }
+
+  Future<void> stop() async {
+    appLog('Playback', 'Stop (reset to initial)');
+    _endSub?.cancel();
+    _endSub = null;
+    await Future.wait([
+      _frontPlayer.stop(),
+      _backPlayer.stop(),
+    ]);
+    state = PlaybackState.initial();
   }
 
   Future<void> setFrontMuted(bool muted) async {

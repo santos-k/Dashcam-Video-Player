@@ -122,3 +122,4 @@ app.*.symbols
 .metadata
 analysis_options.yaml
 dashcam_player.iml
+.claude/settings.local.json
