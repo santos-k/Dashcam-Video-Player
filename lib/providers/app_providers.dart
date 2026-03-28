@@ -1,5 +1,6 @@
 // lib/providers/app_providers.dart
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -92,6 +93,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
   late final Player _frontPlayer;
   late final Player _backPlayer;
+  StreamSubscription<bool>? _endSub;
 
   Player get frontPlayer => _frontPlayer;
   Player get backPlayer  => _backPlayer;
@@ -122,7 +124,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
           _backPlayer.open(Media(pair.backFile!.path),   play: false),
       ]);
     } catch (e) {
-      // ignore open errors — media_kit sometimes throws on re-open
+      debugPrint('media_kit open error: $e');
     }
 
     // Apply sync offset
@@ -150,10 +152,11 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     _listenForEnd(pair);
   }
 
-  void _listenForEnd(pair) {
+  void _listenForEnd(VideoPair pair) {
+    _endSub?.cancel();
     // Use front player if available, otherwise back
     final primary = pair.hasFront ? _frontPlayer : _backPlayer;
-    primary.stream.completed.listen((completed) {
+    _endSub = primary.stream.completed.listen((completed) {
       if (completed && onClipEnd != null) {
         onClipEnd!();
       }
@@ -228,6 +231,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
   @override
   void dispose() {
+    _endSub?.cancel();
     _frontPlayer.dispose();
     _backPlayer.dispose();
     super.dispose();
@@ -274,10 +278,25 @@ class PlaybackState {
 }
 
 // ─────────────────────────────────────────
-// 8. Export progress
+// 8. Export progress (single clip)
 // ─────────────────────────────────────────
 
 final exportProgressProvider = StateProvider<double?>((ref) => null);
+
+// ─────────────────────────────────────────
+// 9b. Batch export progress  (current, total)
+// ─────────────────────────────────────────
+
+class BatchExportState {
+  final int     current;
+  final int     total;
+  final double  clipProgress; // 0-1 within current clip
+  const BatchExportState(this.current, this.total, this.clipProgress);
+  double get overallProgress =>
+      (current + clipProgress) / total;
+}
+
+final batchExportProvider = StateProvider<BatchExportState?>((ref) => null);
 
 
 // ─────────────────────────────────────────

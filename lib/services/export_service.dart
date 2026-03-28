@@ -3,6 +3,7 @@
 // Windows export using system FFmpeg (must be on PATH or in app directory).
 // Download FFmpeg from https://ffmpeg.org/download.html and add to PATH.
 
+import 'dart:convert';
 import 'dart:io';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
@@ -124,11 +125,12 @@ class ExportService {
     return [x, y];
   }
 
-  /// Try to locate ffmpeg.exe — system PATH first, then next to the .exe.
+  /// Try to locate ffmpeg — system PATH first, then next to the running exe.
   static Future<String?> _findFFmpeg() async {
     // 1. Check system PATH
     try {
-      final result = await Process.run('where', ['ffmpeg']);
+      final which  = Platform.isWindows ? 'where' : 'which';
+      final result = await Process.run(which, ['ffmpeg']);
       if (result.exitCode == 0) {
         final path = (result.stdout as String).trim().split('\n').first.trim();
         if (path.isNotEmpty) return path;
@@ -136,16 +138,61 @@ class ExportService {
     } catch (_) {}
 
     // 2. Check next to the running executable
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final local  = File('$exeDir\\ffmpeg.exe');
+    final exeDir     = File(Platform.resolvedExecutable).parent.path;
+    final ffmpegName = Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg';
+    final local      = File('$exeDir${Platform.pathSeparator}$ffmpegName');
     if (await local.exists()) return local.path;
 
     return null;
   }
 
+  /// Extract GPS coordinates from dashcam video metadata via ffprobe.
+  /// Returns (latitude, longitude) or null if not available.
+  static Future<(double, double)?> extractGPS(String videoPath) async {
+    final ffmpeg = await _findFFmpeg();
+    if (ffmpeg == null) return null;
+
+    final exeDir      = File(ffmpeg).parent.path;
+    final ffprobeName = Platform.isWindows ? 'ffprobe.exe' : 'ffprobe';
+    final ffprobe     = '$exeDir${Platform.pathSeparator}$ffprobeName';
+
+    try {
+      final result = await Process.run(ffprobe, [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_format',
+        videoPath,
+      ]);
+      if (result.exitCode != 0) return null;
+
+      final data = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final tags = (data['format']?['tags'] as Map<String, dynamic>?) ?? {};
+
+      // Try common GPS tag names used by dashcams (ISO 6709 / Apple / Android)
+      final loc = tags['location']        as String? ??
+                  tags['location-eng']    as String? ??
+                  tags['com.apple.quicktime.location.ISO6709'] as String?;
+      if (loc == null) return null;
+
+      // ISO 6709: ±DD.DDDD±DDD.DDDD/
+      final match = RegExp(r'([+-]?\d+\.\d+)([+-]\d+\.\d+)').firstMatch(loc);
+      if (match == null) return null;
+
+      final lat = double.tryParse(match.group(1)!);
+      final lon = double.tryParse(match.group(2)!);
+      if (lat == null || lon == null) return null;
+
+      return (lat, lon);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Use ffprobe to get video duration.
   static Future<Duration> _probeDuration(String ffmpeg, String videoPath) async {
-    final ffprobe = ffmpeg.replaceFirst('ffmpeg.exe', 'ffprobe.exe');
+    final exeDir     = File(ffmpeg).parent.path;
+    final ffprobeName = Platform.isWindows ? 'ffprobe.exe' : 'ffprobe';
+    final ffprobe    = '$exeDir${Platform.pathSeparator}$ffprobeName';
     final result  = await Process.run(ffprobe, [
       '-v', 'error',
       '-show_entries', 'format=duration',

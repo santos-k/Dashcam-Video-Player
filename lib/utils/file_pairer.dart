@@ -15,7 +15,7 @@ import '../models/video_pair.dart';
 /// Files inside are matched by timestamp with ±5 second tolerance.
 /// If only a front OR back file exists, it is still included as a single video.
 class FilePairer {
-  static const _videoExtensions = {'.mp4', '.mov', '.avi', '.mkv', '.ts', '.MP4', '.MOV', '.AVI', '.MKV', '.TS'};
+  static const _videoExtensions = {'.mp4', '.mov', '.avi', '.mkv', '.ts'};
   static const _toleranceSeconds = 5;
 
   /// Main entry: scans root directory (e.g. F:\) and returns all pairs.
@@ -67,14 +67,14 @@ class FilePairer {
     for (final entity in entities) {
       if (entity is! File) continue;
       final ext = p.extension(entity.path).toLowerCase();
-      if (!_videoExtensions.contains(ext) && !_videoExtensions.contains(p.extension(entity.path))) continue;
+      if (!_videoExtensions.contains(ext)) continue;
 
       final name     = p.basenameWithoutExtension(entity.path);
       final lastChar = name.isEmpty ? '' : name[name.length - 1].toUpperCase();
       final tsStr    = lastChar == 'F' || lastChar == 'B'
           ? name.substring(0, name.length - 1)
           : name;
-      final ts = _parseTimestamp(tsStr) ?? DateTime.now();
+      final ts = _parseTimestamp(tsStr) ?? (await entity.lastModified());
 
       if (lastChar == 'F') {
         frontFiles.add(_TimestampedFile(entity, ts, false));
@@ -98,11 +98,10 @@ class FilePairer {
     for (final entity in entities) {
       if (entity is! File) continue;
       final ext = p.extension(entity.path).toLowerCase();
-      if (!_videoExtensions.contains(ext) &&
-          !_videoExtensions.contains(p.extension(entity.path))) continue;
+      if (!_videoExtensions.contains(ext)) continue;
 
       final name = p.basenameWithoutExtension(entity.path);
-      final ts   = _parseTimestamp(name) ?? DateTime.now();
+      final ts   = _parseTimestamp(name) ?? (await entity.lastModified());
       result.add(_TimestampedFile(entity, ts, isLock));
     }
 
@@ -224,5 +223,5 @@ class _TimestampedFile {
   final File file;
   final DateTime timestamp;
   final bool isLock;
-  const _TimestampedFile(this.file, this.timestamp, this.isLock);
+  _TimestampedFile(this.file, this.timestamp, this.isLock);
 }

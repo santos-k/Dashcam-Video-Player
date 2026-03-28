@@ -145,7 +145,7 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color:   Colors.black.withOpacity(0.6),
+                        color:   Colors.black.withValues(alpha: 0.6),
                         blurRadius: 12, spreadRadius: 2,
                       ),
                     ],

@@ -1,13 +1,31 @@
 // lib/main.dart
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:window_manager/window_manager.dart';
 import 'screens/player_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized(); // Required for media_kit
+
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      size:        Size(1280, 800),
+      minimumSize: Size(640, 480),
+      title:       'DashCam Player',
+      center:      true,
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
+  MediaKit.ensureInitialized();
+
   runApp(
     const ProviderScope(
       child: DashCamApp(),
