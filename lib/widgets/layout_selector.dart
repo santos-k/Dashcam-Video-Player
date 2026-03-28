@@ -5,8 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/layout_config.dart';
 import '../providers/app_providers.dart';
 
-void showLayoutSelector(BuildContext context) {
-  showModalBottomSheet(
+Future<void> showLayoutSelector(BuildContext context) {
+  return showModalBottomSheet(
     context:         context,
     backgroundColor: const Color(0xFF1E1E1E),
     shape: const RoundedRectangleBorder(
@@ -296,7 +296,7 @@ class _Chip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color:  selected
-              ? const Color(0xFF4FC3F7).withOpacity(0.15)
+              ? const Color(0xFF4FC3F7).withValues(alpha: 0.15)
               : Colors.white10,
           border: Border.all(
             color: selected ? const Color(0xFF4FC3F7) : Colors.transparent,

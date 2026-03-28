@@ -121,13 +121,13 @@ class _ClipTile extends StatelessWidget {
     return ListTile(
       onTap:     onTap,
       tileColor: isCurrent
-          ? const Color(0xFF4FC3F7).withOpacity(0.1)
+          ? const Color(0xFF4FC3F7).withValues(alpha: 0.1)
           : null,
       leading: Container(
         width: 32, height: 32,
         decoration: BoxDecoration(
           color: isCurrent
-              ? const Color(0xFF4FC3F7).withOpacity(0.2)
+              ? const Color(0xFF4FC3F7).withValues(alpha: 0.2)
               : Colors.white10,
           borderRadius: BorderRadius.circular(4),
         ),
@@ -169,8 +169,8 @@ class _ClipTile extends StatelessWidget {
   Widget _pill(String text, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
     decoration: BoxDecoration(
-      color:        color.withOpacity(0.15),
-      border:       Border.all(color: color.withOpacity(0.4)),
+      color:        color.withValues(alpha: 0.15),
+      border:       Border.all(color: color.withValues(alpha: 0.4)),
       borderRadius: BorderRadius.circular(3),
     ),
     child: Text(text,
