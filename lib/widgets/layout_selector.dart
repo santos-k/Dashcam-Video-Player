@@ -26,7 +26,7 @@ Future<void> showLayoutPopup(BuildContext context, {required Rect anchorRect}) {
     pageBuilder: (ctx, _, __) {
       final screenW = MediaQuery.of(ctx).size.width;
       final screenH = MediaQuery.of(ctx).size.height;
-      const popupW  = 440.0;
+      const popupW  = 320.0;
 
       // Centre on anchor, but clamp to screen edges
       double left = (anchorRect.left + anchorRect.right) / 2 - popupW / 2;
@@ -125,37 +125,29 @@ class _LayoutPanelState extends ConsumerState<_LayoutPanel> {
             // ── Layout mode ────────────────────────────────
             const _Label('Layout'),
             const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: _Chip(
-                  icon: Icons.view_column_rounded, label: 'Side by side',
-                  shortcut: '1',
-                  selected: config.mode == LayoutMode.sideBySide,
-                  onTap: () => notifier.state =
-                      config.copyWith(mode: LayoutMode.sideBySide),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _Chip(
-                  icon: Icons.view_stream_rounded, label: 'Stacked',
-                  shortcut: '2',
-                  selected: config.mode == LayoutMode.stacked,
-                  onTap: () => notifier.state =
-                      config.copyWith(mode: LayoutMode.stacked),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _Chip(
-                  icon: Icons.picture_in_picture_alt_rounded, label: 'PIP',
-                  shortcut: '3',
-                  selected: config.mode == LayoutMode.pip,
-                  onTap: () => notifier.state =
-                      config.copyWith(mode: LayoutMode.pip),
-                ),
-              ),
-            ]),
+            _Chip(
+              icon: Icons.view_column_rounded, label: 'Side by side',
+              shortcut: '1',
+              selected: config.mode == LayoutMode.sideBySide,
+              onTap: () => notifier.state =
+                  config.copyWith(mode: LayoutMode.sideBySide),
+            ),
+            const SizedBox(height: 6),
+            _Chip(
+              icon: Icons.view_stream_rounded, label: 'Stacked',
+              shortcut: '2',
+              selected: config.mode == LayoutMode.stacked,
+              onTap: () => notifier.state =
+                  config.copyWith(mode: LayoutMode.stacked),
+            ),
+            const SizedBox(height: 6),
+            _Chip(
+              icon: Icons.picture_in_picture_alt_rounded, label: 'PIP',
+              shortcut: '3',
+              selected: config.mode == LayoutMode.pip,
+              onTap: () => notifier.state =
+                  config.copyWith(mode: LayoutMode.pip),
+            ),
 
             // ── PIP options ────────────────────────────────
             AnimatedSize(

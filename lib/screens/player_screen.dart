@@ -1,5 +1,6 @@
 // lib/screens/player_screen.dart
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _fullscreenTransiting = false;
   bool _mapSidebarOpen      = false;
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
+  Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
@@ -48,9 +50,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     WakelockPlus.disable();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _resetHideTimer() {
+    if (!_overlayVisible) {
+      setState(() => _overlayVisible = true);
+    }
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && ref.read(playbackProvider).isPlaying) {
+        setState(() => _overlayVisible = false);
+      }
+    });
   }
 
   void _handleKey(KeyEvent event) {
@@ -164,8 +179,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       appLog('Shortcut', 'E – export');
       _confirmExport();
     } else if (key == LogicalKeyboardKey.keyC) {
-      appLog('Shortcut', 'C – clip list');
-      _scaffoldKey.currentState?.openDrawer();
+      appLog('Shortcut', 'C – toggle clip list');
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      } else {
+        _scaffoldKey.currentState?.openDrawer();
+      }
     } else if (key == LogicalKeyboardKey.keyI) {
       appLog('Shortcut', 'I – about');
       _showAbout();
@@ -382,8 +401,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     );
     if (ok != true) { _focusNode.requestFocus(); return; }
     appLog('App', 'User quit');
-    ref.read(playbackProvider.notifier).stop();
+    // Destroy window immediately — don't wait for player cleanup
     await windowManager.destroy();
+    exit(0);
   }
 
   Future<void> _confirmExport() async {
@@ -492,10 +512,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
-    ref.read(savingClipsProvider.notifier).state = true;
+    // Count total files to copy
+    int totalFiles = 0;
+    for (final idx in selected) {
+      final pair = pairs[idx];
+      if (pair.hasFront) totalFiles++;
+      if (pair.hasBack) totalFiles++;
+    }
 
     int copied = 0;
     int failed = 0;
+    ref.read(savingClipsProvider.notifier).state = '0/$totalFiles saved';
 
     for (final idx in selected) {
       final pair = pairs[idx];
@@ -505,6 +532,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
           await file.copy(dest);
           copied++;
+          ref.read(savingClipsProvider.notifier).state =
+              '$copied/$totalFiles saved';
         } catch (e) {
           debugPrint('Copy failed: $e');
           failed++;
@@ -513,7 +542,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
-    ref.read(savingClipsProvider.notifier).state = false;
+    ref.read(savingClipsProvider.notifier).state = null;
     _focusNode.requestFocus();
   }
 
@@ -545,11 +574,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           videoPath: mapVideoPath,
           onClose: () => _focusNode.requestFocus(),
         ),
-        body: Column(children: [
-          _MinimalTopBar(
-            clipCount:          pairs.length,
-            isFullscreen:       _isFullscreen,
-            onToggleFullscreen: _toggleFullscreen,
+        body: MouseRegion(
+          onHover: (_) => _resetHideTimer(),
+          child: Column(children: [
+          // Top bar — collapses when hidden so video fills space
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            child: _overlayVisible
+                ? _MinimalTopBar(
+                    clipCount:          pairs.length,
+                    isFullscreen:       _isFullscreen,
+                    onToggleFullscreen: _toggleFullscreen,
+                  )
+                : const SizedBox.shrink(),
           ),
 
           // Video area — tap toggles controls visibility
@@ -557,7 +594,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             child: GestureDetector(
               onTap: () {
                 _focusNode.requestFocus();
-                setState(() => _overlayVisible = !_overlayVisible);
+                if (_overlayVisible) {
+                  _hideTimer?.cancel();
+                  setState(() => _overlayVisible = false);
+                } else {
+                  _resetHideTimer();
+                }
               },
               child: Stack(children: [
                 const DualVideoView(),
@@ -566,24 +608,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ),
           ),
 
-          // Controls bar — slides out below screen when hidden
-          AnimatedSlide(
-            offset:   _overlayVisible ? Offset.zero : const Offset(0, 1),
+          // Controls bar — collapses when hidden so video fills space
+          AnimatedSize(
             duration: const Duration(milliseconds: 200),
-            child: PlaybackControls(
-              onPrevious:     () => _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true),
-              onNext:         () => _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true),
-              onFolder:       _pickFolder,
-              onLayout:       _showLayoutPopup,
-              layoutBtnKey:   _layoutBtnKey,
-              onSaveClip:     _saveClip,
-              onCloseFolder:  _confirmCloseFolder,
-              onQuit:         _confirmQuit,
-              onMap:          _toggleMapSidebar,
-              focusRequester: _focusNode.requestFocus,
-            ),
+            child: _overlayVisible
+                ? PlaybackControls(
+                    onPrevious:     () => _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true),
+                    onNext:         () => _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true),
+                    onFolder:       _pickFolder,
+                    onLayout:       _showLayoutPopup,
+                    layoutBtnKey:   _layoutBtnKey,
+                    onSaveClip:     _saveClip,
+                    onCloseFolder:  _confirmCloseFolder,
+                    onQuit:         _confirmQuit,
+                    onMap:          _toggleMapSidebar,
+                    focusRequester: _focusNode.requestFocus,
+                  )
+                : const SizedBox.shrink(),
           ),
         ]),
+        ),
       ),
     );
   }

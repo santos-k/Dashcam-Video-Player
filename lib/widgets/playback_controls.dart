@@ -53,7 +53,8 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     final exportProg  = ref.watch(exportProgressProvider);
     final frontMuted  = ref.watch(frontMutedProvider);
     final backMuted   = ref.watch(backMutedProvider);
-    final isSaving    = ref.watch(savingClipsProvider);
+    final saveProgress = ref.watch(savingClipsProvider);
+    final isSaving     = saveProgress != null;
     final notifier    = ref.read(playbackProvider.notifier);
 
     final hasPrev  = index > 0;
@@ -202,6 +203,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           // Save current clip
           _SaveBtn(
             isSaving: isSaving,
+            progressText: saveProgress,
             onPressed: isSaving ? null : () {
               widget.onSaveClip?.call();
             },
@@ -655,8 +657,9 @@ class _MuteBtn extends StatelessWidget {
 
 class _SaveBtn extends StatelessWidget {
   final bool isSaving;
+  final String? progressText;
   final VoidCallback? onPressed;
-  const _SaveBtn({required this.isSaving, required this.onPressed});
+  const _SaveBtn({required this.isSaving, this.progressText, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -692,7 +695,7 @@ class _SaveBtn extends StatelessWidget {
                   color: onPressed != null ? Colors.white54 : Colors.white24),
             const SizedBox(width: 5),
             Text(
-              isSaving ? 'Saving...' : 'Save',
+              isSaving ? (progressText ?? 'Saving...') : 'Save',
               style: TextStyle(
                 fontSize: 11,
                 color: isSaving

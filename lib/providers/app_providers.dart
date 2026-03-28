@@ -338,7 +338,8 @@ final batchExportProvider = StateProvider<BatchExportState?>((ref) => null);
 // 10. Save-in-progress flag
 // ─────────────────────────────────────────
 
-final savingClipsProvider = StateProvider<bool>((ref) => false);
+/// null = not saving, non-null = progress text (e.g. "1/4 saved")
+final savingClipsProvider = StateProvider<String?>((ref) => null);
 
 // ─────────────────────────────────────────
 // 9. Mute state per camera
