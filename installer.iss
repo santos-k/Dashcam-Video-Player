@@ -1,5 +1,5 @@
 #define AppName "Dashcam Player"
-#define AppVersion "1.1.1"
+#define AppVersion "1.2.0"
 #define AppPublisher "santos-k"
 #define AppExeName "dashcam_player.exe"
 #define AppURL "https://github.com/santos-k/Dashcam-Video-Player"
