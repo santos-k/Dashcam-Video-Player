@@ -3,8 +3,9 @@
 // Interactive OpenStreetMap sidebar with coordinate input, search, zoom/pan,
 // multiple tile layers, and browser-open buttons.  State (coordinates, zoom,
 // tile layer) is persisted via Riverpod so it survives open/close cycles.
+// Shows device location by default on first open.
 
-import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -12,7 +13,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_providers.dart';
-import '../models/gps_point.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
 
@@ -45,12 +45,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   // Marker position (null = no marker)
   LatLng? _marker;
 
-  // Live GPS tracking
-  Timer? _gpsTimer;
-  bool   _liveTracking = false;
-  List<LatLng> _route = [];
-  double? _currentSpeed;
-
   static const _tileLayers = [
     (label: 'Standard', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     (label: 'Topo',     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
@@ -66,14 +60,13 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
       _latCtrl.text = saved.lat!.toStringAsFixed(6);
       _lonCtrl.text = saved.lon!.toStringAsFixed(6);
       _marker = LatLng(saved.lat!, saved.lon!);
-    }
-    // Auto-extract GPS only on first open (when no saved coords)
-    if (saved.lat == null && widget.videoPath != null) {
+    } else if (widget.videoPath != null) {
+      // Try extracting GPS from video metadata first
       _tryExtractGPS();
+    } else {
+      // No saved coords, no video — get device location
+      _tryDeviceLocation();
     }
-
-    // Start live GPS tracking
-    _startGpsTracking();
   }
 
   @override
@@ -86,76 +79,13 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
 
   @override
   void dispose() {
-    _gpsTimer?.cancel();
-    // Persist is handled via onClose / close button; ref is already invalid
-    // during dispose, so we only clean up controllers here.
     _latCtrl.dispose();
     _lonCtrl.dispose();
     _mapController.dispose();
     super.dispose();
   }
 
-  // ─── Live GPS tracking ─────────────────────────────────────────────────────
-
-  void _startGpsTracking() {
-    _gpsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      _updateGpsFromPlayback();
-    });
-  }
-
-  void _updateGpsFromPlayback() {
-    if (!mounted) return;
-
-    final gpsPoints = ref.read(gpsPointsProvider);
-    if (gpsPoints.isEmpty) return;
-
-    final playback = ref.read(playbackProvider);
-    if (!playback.isLoaded) return;
-
-    final notifier = ref.read(playbackProvider.notifier);
-    final player = playback.hasFront ? notifier.frontPlayer : notifier.backPlayer;
-    final position = player.state.position;
-
-    // Find the nearest GPS point to the current playback position
-    GpsPoint? nearest;
-    int minDiff = 999999999;
-    for (final point in gpsPoints) {
-      final diff = (point.timestamp.inMilliseconds - position.inMilliseconds).abs();
-      if (diff < minDiff) {
-        minDiff = diff;
-        nearest = point;
-      }
-    }
-
-    if (nearest == null) return;
-
-    final newPos = LatLng(nearest.lat, nearest.lon);
-
-    // Build route from all points up to current position
-    final routePoints = <LatLng>[];
-    for (final pt in gpsPoints) {
-      if (pt.timestamp <= position + const Duration(seconds: 3)) {
-        routePoints.add(LatLng(pt.lat, pt.lon));
-      }
-    }
-
-    setState(() {
-      _liveTracking = true;
-      _marker = newPos;
-      _route = routePoints;
-      _currentSpeed = nearest!.speed;
-      _latCtrl.text = nearest.lat.toStringAsFixed(6);
-      _lonCtrl.text = nearest.lon.toStringAsFixed(6);
-    });
-
-    // Auto-center on marker during live tracking
-    try {
-      _mapController.move(newPos, _mapController.camera.zoom);
-    } catch (_) {}
-  }
-
   /// Save current state to provider so it survives sidebar close/reopen.
-  /// Must be called while the widget is still mounted (not from dispose).
   void _persist() {
     if (!mounted) return;
     try {
@@ -167,7 +97,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
         tileLayer: ref.read(mapStateProvider).tileLayer,
       );
     } catch (_) {
-      // MapController might not be attached yet
       try {
         ref.read(mapStateProvider.notifier).state = MapState(
           lat: _lat,
@@ -180,6 +109,58 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   double? get _lat => double.tryParse(_latCtrl.text.trim());
   double? get _lon => double.tryParse(_lonCtrl.text.trim());
 
+  /// Try to get device location using platform-specific commands.
+  Future<void> _tryDeviceLocation() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final coords = await _getDeviceLocation();
+      if (!mounted) return;
+      if (coords != null) {
+        _latCtrl.text = coords.$1.toStringAsFixed(6);
+        _lonCtrl.text = coords.$2.toStringAsFixed(6);
+        _marker = LatLng(coords.$1, coords.$2);
+        _moveToMarker(_coordZoom);
+        _persist();
+        appLog('Map', 'Device location: ${coords.$1}, ${coords.$2}');
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  /// Get device GPS location via PowerShell (Windows) or system commands.
+  static Future<(double, double)?> _getDeviceLocation() async {
+    if (Platform.isWindows) {
+      try {
+        final result = await Process.run('powershell', [
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+          r'''
+Add-Type -AssemblyName System.Device
+$w = New-Object System.Device.Location.GeoCoordinateWatcher
+$w.Start()
+$timeout = 10
+while($w.Status -ne 'Ready' -and $timeout -gt 0){Start-Sleep -Seconds 1;$timeout--}
+if($w.Status -eq 'Ready'){
+  $c=$w.Position.Location
+  Write-Output "$($c.Latitude),$($c.Longitude)"
+}
+$w.Stop()
+''',
+        ]);
+        if (result.exitCode == 0) {
+          final parts = (result.stdout as String).trim().split(',');
+          if (parts.length == 2) {
+            final lat = double.tryParse(parts[0]);
+            final lon = double.tryParse(parts[1]);
+            if (lat != null && lon != null && lat != 0 && lon != 0) {
+              return (lat, lon);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
   Future<void> _tryExtractGPS() async {
     setState(() { _loading = true; _error = null; });
     final coords = await ExportService.extractGPS(widget.videoPath!);
@@ -191,9 +172,15 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
       _moveToMarker(_coordZoom);
       appLog('Map', 'GPS extracted: ${coords.$1}, ${coords.$2}');
     } else {
-      _error = 'No GPS data found.';
+      // No GPS in video metadata — try device location as fallback
+      if (_marker == null) {
+        await _tryDeviceLocation();
+        if (_marker == null) {
+          _error = 'No GPS data found. Enter coordinates manually.';
+        }
+      }
     }
-    setState(() => _loading = false);
+    if (mounted) setState(() => _loading = false);
   }
 
   void _searchCoords() {
@@ -221,7 +208,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   void _zoomIn() {
     final cam = _mapController.camera;
     final newZoom = (cam.zoom + 1).clamp(2.0, 18.0);
-    // Zoom towards the marker if one exists, otherwise towards center
     final target = _marker ?? cam.center;
     _mapController.move(target, newZoom);
   }
@@ -284,10 +270,15 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                           style: TextStyle(color: Colors.white, fontSize: 14,
                               fontWeight: FontWeight.w600)),
                         const Spacer(),
+                        _IconBtn(
+                          icon: Icons.my_location_rounded,
+                          tooltip: 'My location',
+                          onTap: _loading ? null : _tryDeviceLocation,
+                        ),
                         if (widget.videoPath != null)
                           _IconBtn(
                             icon: Icons.refresh_rounded,
-                            tooltip: 'Re-extract GPS',
+                            tooltip: 'Re-extract GPS from video',
                             onTap: _loading ? null : _tryExtractGPS,
                           ),
                         _IconBtn(
@@ -378,45 +369,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                       ),
                     ),
 
-                    // ─── Live GPS info bar ──────────────
-                    if (_liveTracking) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        color: const Color(0xFF1A1A1A),
-                        child: Row(children: [
-                          const Icon(Icons.gps_fixed_rounded,
-                              size: 12, color: Color(0xFF4FC3F7)),
-                          const SizedBox(width: 6),
-                          const Text('Live',
-                            style: TextStyle(color: Color(0xFF4FC3F7),
-                                fontSize: 10, fontWeight: FontWeight.w600)),
-                          const Spacer(),
-                          if (_currentSpeed != null)
-                            Text('${_currentSpeed!.round()} km/h',
-                              style: const TextStyle(
-                                  color: Colors.white60, fontSize: 10)),
-                          const SizedBox(width: 8),
-                          Text('${ref.read(gpsPointsProvider).length} pts',
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 10)),
-                        ]),
-                      ),
-                    ],
-
-                    if (ref.watch(isExtractingGpsProvider))
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        color: const Color(0xFF1A1A1A),
-                        child: const Row(children: [
-                          SizedBox(width: 12, height: 12,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 1.5, color: Color(0xFF4FC3F7))),
-                          SizedBox(width: 8),
-                          Text('Extracting GPS data...',
-                            style: TextStyle(color: Colors.white38, fontSize: 10)),
-                        ]),
-                      ),
-
                     // ─── Interactive map ─────────────────
                     Expanded(
                       child: FlutterMap(
@@ -437,15 +389,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                             userAgentPackageName: 'com.dashcam.player',
                             maxZoom: 18,
                           ),
-                          // Route polyline
-                          if (_route.length >= 2)
-                            PolylineLayer(polylines: [
-                              Polyline(
-                                points: _route,
-                                strokeWidth: 3,
-                                color: const Color(0xFF4FC3F7).withValues(alpha: 0.7),
-                              ),
-                            ]),
                           // Marker
                           if (_marker != null)
                             MarkerLayer(markers: [
@@ -453,18 +396,11 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                                 point: _marker!,
                                 width: 40, height: 40,
                                 alignment: Alignment.topCenter,
-                                child: Icon(
-                                  _liveTracking
-                                      ? Icons.navigation_rounded
-                                      : Icons.location_on,
-                                  color: _liveTracking
-                                      ? const Color(0xFF4FC3F7)
-                                      : Colors.red,
-                                  size: 36,
-                                ),
+                                child: const Icon(Icons.location_on,
+                                    color: Colors.red, size: 40),
                               ),
                             ]),
-                          // Zoom buttons
+                          // Zoom + re-center buttons
                           Align(
                             alignment: Alignment.bottomRight,
                             child: Padding(
@@ -475,6 +411,16 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
                                   _ZoomBtn(icon: Icons.add, onTap: _zoomIn),
                                   const SizedBox(height: 4),
                                   _ZoomBtn(icon: Icons.remove, onTap: _zoomOut),
+                                  const SizedBox(height: 4),
+                                  _ZoomBtn(
+                                    icon: Icons.my_location_rounded,
+                                    onTap: () {
+                                      if (_marker != null) {
+                                        _mapController.move(
+                                            _marker!, _coordZoom);
+                                      }
+                                    },
+                                  ),
                                 ],
                               ),
                             ),

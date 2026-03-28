@@ -242,14 +242,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         ref.read(playbackProvider.notifier).setSpeed(speed);
       }
     });
-    // Trigger GPS extraction in background
-    _extractGps(pairs[index]);
-  }
-
-  void _extractGps(VideoPair pair) {
-    final videoPath = pair.frontPath ?? pair.backPath;
-    if (videoPath == null) return;
-    extractGpsForVideo(ref, videoPath);
   }
 
   void _onClipEnd() {
@@ -318,7 +310,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final notifier = ref.read(playbackProvider.notifier);
     notifier.onClipEnd = _onClipEnd;
     await notifier.loadPair(pairs.first, 0, autoPlay: false);
-    _extractGps(pairs.first);
     _focusNode.requestFocus();
   }
 
@@ -370,7 +361,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(playbackSpeedProvider.notifier).state = 1.0;
     ref.read(frontMutedProvider.notifier).state = false;
     ref.read(backMutedProvider.notifier).state = false;
-    ref.read(gpsPointsProvider.notifier).state = [];
     _focusNode.requestFocus();
   }
 

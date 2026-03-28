@@ -7,10 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
-import '../models/gps_point.dart';
 import '../utils/file_pairer.dart';
 import '../services/log_service.dart';
-import '../services/gps_extractor_service.dart';
 
 // ─────────────────────────────────────────
 // 1. Sort order
@@ -385,23 +383,3 @@ const playbackSpeeds = [0.1, 0.2, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0
 
 final playbackSpeedProvider = StateProvider<double>((ref) => 1.0);
 
-// ─────────────────────────────────────────
-// 13. GPS extraction
-// ─────────────────────────────────────────
-
-final gpsPointsProvider   = StateProvider<List<GpsPoint>>((ref) => []);
-final isExtractingGpsProvider = StateProvider<bool>((ref) => false);
-
-/// Trigger GPS extraction for the given video path (runs in background).
-Future<void> extractGpsForVideo(WidgetRef ref, String videoPath) async {
-  ref.read(gpsPointsProvider.notifier).state = [];
-  ref.read(isExtractingGpsProvider.notifier).state = true;
-  try {
-    final points = await GpsExtractorService.extractGpsPoints(videoPath);
-    ref.read(gpsPointsProvider.notifier).state = points;
-  } catch (e) {
-    appLog('GPS', 'Extraction failed: $e');
-  } finally {
-    ref.read(isExtractingGpsProvider.notifier).state = false;
-  }
-}
