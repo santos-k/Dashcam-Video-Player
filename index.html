@@ -233,47 +233,150 @@
       max-width: 560px; margin-left: auto; margin-right: auto;
     }
 
-    /* ── Showcase gallery ─────────────────────────────── */
-    .showcase-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    /* ── Showcase — Bento grid ────────────────────────── */
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      grid-auto-rows: minmax(180px, auto);
+      gap: 16px;
     }
 
-    .showcase-item {
+    .bento-card {
       position: relative; border-radius: var(--radius);
-      overflow: hidden; border: 1px solid var(--border);
-      transition: all 0.3s; cursor: pointer;
+      overflow: hidden; cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     }
 
-    .showcase-item:hover {
-      transform: translateY(-6px);
-      border-color: rgba(79,195,247,0.4);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    .bento-card:hover {
+      border-color: rgba(79,195,247,0.35);
+      transform: translateY(-5px) scale(1.01);
+      box-shadow:
+        0 20px 60px rgba(0,0,0,0.4),
+        0 0 40px rgba(79,195,247,0.06);
+      z-index: 2;
     }
 
-    .showcase-item img { width: 100%; display: block; }
+    .bento-card img {
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
+      transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
 
-    .showcase-item .overlay {
+    .bento-card:hover img { transform: scale(1.04); }
+
+    /* Overlay with glass effect */
+    .bento-info {
       position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 18px;
-      background: linear-gradient(transparent, rgba(0,0,0,0.9));
+      padding: 20px 18px 16px;
+      background: linear-gradient(transparent 0%, rgba(6,6,11,0.75) 40%, rgba(6,6,11,0.95) 100%);
+      backdrop-filter: blur(6px);
+      transform: translateY(4px);
+      opacity: 0.92;
+      transition: all 0.3s;
     }
 
-    .showcase-item .overlay h4 { font-size: 0.92rem; font-weight: 600; margin-bottom: 4px; }
-    .showcase-item .overlay p { font-size: 0.78rem; color: var(--text-mid); line-height: 1.4; }
+    .bento-card:hover .bento-info {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .bento-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #000; font-size: 0.7rem; font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .bento-info h4 {
+      font-size: 0.95rem; font-weight: 700;
+      margin-bottom: 4px; letter-spacing: -0.01em;
+    }
+
+    .bento-info p {
+      font-size: 0.78rem; color: var(--text-mid);
+      line-height: 1.45;
+    }
+
+    .bento-tag {
+      position: absolute; top: 14px; right: 14px;
+      padding: 4px 10px; border-radius: 6px;
+      background: rgba(6,6,11,0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.68rem; font-weight: 600;
+      color: var(--accent); text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0; transform: translateY(-4px);
+      transition: all 0.3s;
+    }
+
+    .bento-card:hover .bento-tag { opacity: 1; transform: translateY(0); }
+
+    /* Bento layout — featured + grid */
+    .b-featured { grid-column: span 7; grid-row: span 2; }
+    .b-side     { grid-column: span 5; }
+    .b-third    { grid-column: span 4; }
+
+    @media (max-width: 900px) {
+      .bento { grid-template-columns: repeat(6, 1fr); }
+      .b-featured { grid-column: span 6; grid-row: span 1; }
+      .b-side     { grid-column: span 6; }
+      .b-third    { grid-column: span 3; }
+    }
+
+    @media (max-width: 600px) {
+      .bento { grid-template-columns: 1fr; grid-auto-rows: minmax(200px, auto); }
+      .b-featured, .b-side, .b-third { grid-column: span 1; grid-row: span 1; }
+    }
 
     /* ── Lightbox ──────────────────────────────────────── */
     .lightbox {
       display: none; position: fixed; inset: 0; z-index: 1000;
-      background: rgba(0,0,0,0.95);
+      flex-direction: column;
       align-items: center; justify-content: center;
       cursor: pointer; padding: 32px;
-      backdrop-filter: blur(10px);
+      background: rgba(0,0,0,0.92);
+      backdrop-filter: blur(24px) saturate(180%);
+      animation: lbFadeIn 0.2s ease-out;
     }
 
+    @keyframes lbFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
     .lightbox.open { display: flex; }
-    .lightbox img { max-width: 100%; max-height: 90vh; border-radius: 12px; box-shadow: 0 0 80px rgba(0,0,0,0.8); }
-    .lightbox .lb-close { position: absolute; top: 20px; right: 28px; color: white; font-size: 2.2rem; cursor: pointer; opacity: 0.5; transition: opacity 0.2s; }
-    .lightbox .lb-close:hover { opacity: 1; }
+
+    .lightbox img {
+      max-width: 95%; max-height: 85vh;
+      border-radius: 14px;
+      box-shadow: 0 0 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+      animation: lbScaleIn 0.25s ease-out;
+    }
+
+    @keyframes lbScaleIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .lightbox .lb-close {
+      position: absolute; top: 20px; right: 28px;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 1.4rem;
+      cursor: pointer; opacity: 0.7;
+      transition: all 0.2s;
+    }
+
+    .lightbox .lb-close:hover { opacity: 1; background: rgba(255,255,255,0.15); }
+
+    .lightbox .lb-hint {
+      margin-top: 16px;
+      color: rgba(255,255,255,0.3);
+      font-size: 0.8rem;
+    }
 
     /* ── Feature grid ─────────────────────────────────── */
     .features-grid {
@@ -533,32 +636,71 @@
   <section class="section" id="showcase" style="padding-top: 0;">
     <p class="section-label">Showcase</p>
     <h2 class="section-title">See It in Action</h2>
-    <p class="section-subtitle">Every view and feature captured from real dashcam footage</p>
+    <p class="section-subtitle">Click any screenshot to expand. Built with real dashcam footage.</p>
 
-    <div class="showcase-grid">
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/landing.png')">
-        <img src="assets/screenshots/landing.png" alt="Landing page" loading="lazy">
-        <div class="overlay"><h4>Welcome Screen</h4><p>3-column shortcut reference with one-click folder open</p></div>
+    <div class="bento">
+      <!-- Featured: Side by Side (large) -->
+      <div class="bento-card b-featured" onclick="openLightbox('assets/screenshots/side_by_side.png')">
+        <img src="assets/screenshots/side_by_side.png" alt="Side by side dual camera view" loading="lazy">
+        <span class="bento-tag">Featured</span>
+        <div class="bento-info">
+          <div class="bento-num">1</div>
+          <h4>Side-by-Side View</h4>
+          <p>Front and back cameras synchronized frame-by-frame with independent audio control and real-time seek</p>
+        </div>
       </div>
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/stacked.png')">
+
+      <!-- Side: Stacked -->
+      <div class="bento-card b-side" onclick="openLightbox('assets/screenshots/stacked.png')">
         <img src="assets/screenshots/stacked.png" alt="Stacked layout" loading="lazy">
-        <div class="overlay"><h4>Stacked Layout</h4><p>Front on top, back below for wide monitors</p></div>
+        <span class="bento-tag">Layout</span>
+        <div class="bento-info">
+          <div class="bento-num">2</div>
+          <h4>Stacked Layout</h4>
+          <p>Front on top, back below &mdash; ideal for ultrawide monitors</p>
+        </div>
       </div>
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/pip.png')">
-        <img src="assets/screenshots/pip.png" alt="PIP mode" loading="lazy">
-        <div class="overlay"><h4>Picture-in-Picture</h4><p>Draggable PIP with GPS coordinates and camera swap</p></div>
+
+      <!-- Side: PIP -->
+      <div class="bento-card b-side" onclick="openLightbox('assets/screenshots/pip.png')">
+        <img src="assets/screenshots/pip.png" alt="Picture-in-Picture" loading="lazy">
+        <span class="bento-tag">Layout</span>
+        <div class="bento-info">
+          <div class="bento-num">3</div>
+          <h4>Picture-in-Picture</h4>
+          <p>Draggable, resizable overlay. Press 3 to swap primary camera</p>
+        </div>
       </div>
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/clips.png')">
-        <img src="assets/screenshots/clips.png" alt="Clip browser" loading="lazy">
-        <div class="overlay"><h4>Clip Browser</h4><p>Thumbnails, sort, multi-select, and instant navigation</p></div>
+
+      <!-- Third row: 3 equal cards -->
+      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/clips.png')">
+        <img src="assets/screenshots/clips.png" alt="Clip browser with thumbnails" loading="lazy">
+        <span class="bento-tag">Browser</span>
+        <div class="bento-info">
+          <div class="bento-num">4</div>
+          <h4>Clip Browser</h4>
+          <p>Thumbnails, multi-select, batch delete &amp; instant navigation</p>
+        </div>
       </div>
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/map.png')">
+
+      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/map.png')">
         <img src="assets/screenshots/map.png" alt="GPS Map" loading="lazy">
-        <div class="overlay"><h4>GPS Map</h4><p>Interactive OpenStreetMap with multiple tile layers</p></div>
+        <span class="bento-tag">GPS</span>
+        <div class="bento-info">
+          <div class="bento-num">5</div>
+          <h4>GPS Map</h4>
+          <p>Interactive OpenStreetMap with tile layers &amp; coordinate search</p>
+        </div>
       </div>
-      <div class="showcase-item" onclick="openLightbox('assets/screenshots/map_sidebar.png')">
-        <img src="assets/screenshots/map_sidebar.png" alt="Map sidebar" loading="lazy">
-        <div class="overlay"><h4>Map + Playback</h4><p>Review footage alongside GPS position</p></div>
+
+      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/landing.png')">
+        <img src="assets/screenshots/landing.png" alt="Welcome screen" loading="lazy">
+        <span class="bento-tag">Start</span>
+        <div class="bento-info">
+          <div class="bento-num">6</div>
+          <h4>Welcome Screen</h4>
+          <p>Full shortcut reference with one-click folder open</p>
+        </div>
       </div>
     </div>
   </section>
@@ -665,7 +807,8 @@
   <!-- Lightbox -->
   <div class="lightbox" id="lightbox" onclick="closeLightbox()">
     <span class="lb-close">&times;</span>
-    <img id="lb-img" src="" alt="Screenshot preview">
+    <img id="lb-img" src="" alt="Screenshot preview" onclick="event.stopPropagation()">
+    <p class="lb-hint">Click outside or press Esc to close</p>
   </div>
 
   <script>
