@@ -17,8 +17,11 @@ import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
+import '../widgets/dashcam_overlay.dart';
 import '../widgets/map_dialog.dart';
 import '../widgets/shortcut_settings_dialog.dart';
+import '../providers/dashcam_providers.dart';
+import '../models/dashcam_state.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
 import '../services/thumbnail_service.dart';
@@ -37,6 +40,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _mapSidebarOpen      = false;
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
   bool _aboutOpen           = false;   // track About popup for toggle
+  bool _dashcamOpen         = false;   // dashcam Wi-Fi overlay
   Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -95,6 +99,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     // ── Escape is always hardwired ──
     if (key == LogicalKeyboardKey.escape) {
+      if (_dashcamOpen) {
+        setState(() => _dashcamOpen = false);
+        _focusNode.requestFocus();
+        return;
+      }
       if ((_scaffoldKey.currentState?.isDrawerOpen ?? false) &&
           ref.read(clipSelectionModeProvider)) {
         ref.read(clipSelectionModeProvider.notifier).state = false;
@@ -816,6 +825,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     onToggleFullscreen: _toggleFullscreen,
                     onAbout:            _showAbout,
                     onShortcutSettings: _showShortcutSettings,
+                    onDashcam: () => setState(() => _dashcamOpen = !_dashcamOpen),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -846,6 +856,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                       child: GestureDetector(
                         onTap: () {}, // absorb taps on the panel
                         child: const _AboutPanel(),
+                      ),
+                    ),
+                  ),
+                // Dashcam Wi-Fi overlay
+                if (_dashcamOpen)
+                  GestureDetector(
+                    onTap: () => setState(() => _dashcamOpen = false),
+                    child: Container(
+                      color: Colors.black54,
+                      child: GestureDetector(
+                        onTap: () {}, // absorb taps on the panel
+                        child: DashcamOverlay(
+                          onClose: () {
+                            setState(() => _dashcamOpen = false);
+                            _focusNode.requestFocus();
+                          },
+                        ),
                       ),
                     ),
                   ),
@@ -886,12 +913,14 @@ class _MinimalTopBar extends ConsumerWidget {
   final VoidCallback onToggleFullscreen;
   final VoidCallback? onAbout;
   final VoidCallback? onShortcutSettings;
+  final VoidCallback? onDashcam;
   const _MinimalTopBar({
     required this.clipCount,
     required this.isFullscreen,
     required this.onToggleFullscreen,
     this.onAbout,
     this.onShortcutSettings,
+    this.onDashcam,
   });
 
   @override
@@ -929,6 +958,8 @@ class _MinimalTopBar extends ConsumerWidget {
           ),
         ],
         const Spacer(),
+        _DashcamStatusBtn(onTap: onDashcam),
+        const SizedBox(width: 2),
         Tooltip(
           message: 'Keyboard shortcuts',
           child: IconButton(
@@ -974,6 +1005,32 @@ class _MinimalTopBar extends ConsumerWidget {
   }
 }
 
+class _DashcamStatusBtn extends ConsumerWidget {
+  final VoidCallback? onTap;
+  const _DashcamStatusBtn({this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(dashcamProvider).status;
+    final (color, tip) = switch (status) {
+      DashcamConnectionStatus.connected => (const Color(0xFF4FC3F7), 'Dashcam connected'),
+      DashcamConnectionStatus.connecting => (Colors.amber, 'Connecting to dashcam...'),
+      DashcamConnectionStatus.error => (Colors.redAccent, 'Dashcam connection error'),
+      _ => (Colors.white38, 'Dashcam Wi-Fi'),
+    };
+    return Tooltip(
+      message: tip,
+      child: IconButton(
+        icon: Icon(Icons.wifi_rounded, color: color),
+        onPressed: onTap,
+        iconSize: 18,
+        padding: const EdgeInsets.all(6),
+        constraints: const BoxConstraints(),
+      ),
+    );
+  }
+}
+
 // ─── About panel (in-widget overlay, not a dialog) ───────────────────────────
 
 class _AboutPanel extends StatelessWidget {
@@ -1014,7 +1071,7 @@ class _AboutPanel extends StatelessWidget {
                 Text('DashCam Player',
                     style: TextStyle(color: Colors.white, fontSize: 16,
                         fontWeight: FontWeight.w700)),
-                Text('v1.2.0  \u00b7  Desktop',
+                Text('v2.0.0  \u00b7  Desktop',
                     style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
               ],
             ),
