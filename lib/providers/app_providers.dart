@@ -7,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
+import '../models/shortcut_action.dart';
 import '../utils/file_pairer.dart';
 import '../services/log_service.dart';
+import '../services/shortcut_service.dart';
 
 // ─────────────────────────────────────────
 // 1. Sort order
@@ -17,6 +19,20 @@ import '../services/log_service.dart';
 enum SortOrder { newestFirst, oldestFirst }
 
 final sortOrderProvider = StateProvider<SortOrder>((ref) => SortOrder.oldestFirst);
+
+// ─────────────────────────────────────────
+// 1b. Clip view mode & selection
+// ─────────────────────────────────────────
+
+enum ClipViewMode { text, thumbnail }
+
+final clipViewModeProvider = StateProvider<ClipViewMode>((ref) => ClipViewMode.text);
+
+/// Whether the clip list is in multi-select mode.
+final clipSelectionModeProvider = StateProvider<bool>((ref) => false);
+
+/// Indices of selected clips (used for save/delete actions in the drawer).
+final selectedClipIndicesProvider = StateProvider<Set<int>>((ref) => {});
 
 // ─────────────────────────────────────────
 // 2. Video pair list
@@ -39,6 +55,19 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
     state = order == SortOrder.newestFirst
         ? _raw.reversed.toList()
         : List.of(_raw);
+  }
+
+  /// Remove pairs at the given indices and return the removed pairs.
+  List<VideoPair> removePairs(Set<int> indices) {
+    final removed = <VideoPair>[];
+    final sorted = indices.toList()..sort((a, b) => b.compareTo(a)); // reverse
+    for (final i in sorted) {
+      if (i >= 0 && i < _raw.length) {
+        removed.add(_raw.removeAt(i));
+      }
+    }
+    state = List.of(_raw);
+    return removed;
   }
 
   void clear() {
@@ -383,4 +412,27 @@ final mapStateProvider = StateProvider<MapState>((ref) => const MapState());
 const playbackSpeeds = [0.1, 0.2, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
 
 final playbackSpeedProvider = StateProvider<double>((ref) => 1.0);
+
+// ─────────────────────────────────────────
+// 13. Keyboard shortcut configuration
+// ─────────────────────────────────────────
+
+class ShortcutConfigNotifier extends StateNotifier<ShortcutConfig> {
+  ShortcutConfigNotifier() : super(ShortcutService.load());
+
+  void updateBinding(ShortcutAction action, KeyBinding binding) {
+    state = state.withBinding(action, binding);
+    ShortcutService.save(state);
+  }
+
+  void resetToDefaults() {
+    state = ShortcutConfig.defaults();
+    ShortcutService.save(state);
+  }
+}
+
+final shortcutConfigProvider =
+    StateNotifierProvider<ShortcutConfigNotifier, ShortcutConfig>(
+  (ref) => ShortcutConfigNotifier(),
+);
 

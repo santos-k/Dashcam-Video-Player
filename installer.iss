@@ -1,5 +1,5 @@
 #define AppName "Dashcam Player"
-#define AppVersion "1.2.0"
+#define AppVersion "2.0.0"
 #define AppPublisher "santos-k"
 #define AppExeName "dashcam_player.exe"
 #define AppURL "https://github.com/santos-k/Dashcam-Video-Player"
@@ -15,7 +15,7 @@ AppSupportURL={#AppURL}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-OutputDir=installer_output
+OutputDir=.
 OutputBaseFilename=DashcamPlayer_Setup_v{#AppVersion}
 SetupIconFile=windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
