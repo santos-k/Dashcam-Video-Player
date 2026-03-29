@@ -17,8 +17,10 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
   late VideoController _frontController;
   late VideoController _backController;
 
-  // PIP drag state — offset from top-left of the video area
-  Offset _pipOffset     = const Offset(-1, -1); // -1 = not placed yet, use default
+  // PIP drag state — stored as fractional position within the video rect
+  // (-1, -1) = not placed yet, use default alignment
+  double _pipFracX      = -1;
+  double _pipFracY      = -1;
   double _pipWidth      = 280;
   double _pipHeight     = 158;
   bool   _isDragging    = false;
@@ -39,7 +41,7 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     ref.listenManual(pipResetProvider, (_, __) {
-      setState(() => _pipOffset = const Offset(-1, -1));
+      setState(() { _pipFracX = -1; _pipFracY = -1; });
     });
   }
 
@@ -75,21 +77,41 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
     return Rect.fromLTWH(offsetX, offsetY, displayW, displayH);
   }
 
-  Offset _defaultOffset(Rect videoRect, LayoutConfig layout) {
-    double x, y;
-    const margin = 16.0;
-
+  /// Calculate default fractional position based on alignment setting.
+  (double, double) _defaultFrac(LayoutConfig layout) {
+    double fx, fy;
     switch (layout.pipHAlign) {
-      case PipHAlign.left:   x = videoRect.left + margin; break;
-      case PipHAlign.center: x = videoRect.left + (videoRect.width  - _pipWidth)  / 2; break;
-      case PipHAlign.right:  x = videoRect.right - _pipWidth  - margin; break;
+      case PipHAlign.left:   fx = 0.0; break;
+      case PipHAlign.center: fx = 0.5; break;
+      case PipHAlign.right:  fx = 1.0; break;
     }
     switch (layout.pipVAlign) {
-      case PipVAlign.top:    y = videoRect.top + margin; break;
-      case PipVAlign.center: y = videoRect.top + (videoRect.height - _pipHeight) / 2; break;
-      case PipVAlign.bottom: y = videoRect.bottom - _pipHeight - margin; break;
+      case PipVAlign.top:    fy = 0.0; break;
+      case PipVAlign.center: fy = 0.5; break;
+      case PipVAlign.bottom: fy = 1.0; break;
     }
-    return Offset(x, y);
+    return (fx, fy);
+  }
+
+  /// Convert fractional position to absolute pixel offset within videoRect.
+  Offset _fracToAbsolute(double fx, double fy, Rect videoRect) {
+    final rangeX = videoRect.width  - _pipWidth  - _pipMargin * 2;
+    final rangeY = videoRect.height - _pipHeight - _pipMargin * 2;
+    return Offset(
+      videoRect.left + _pipMargin + fx.clamp(0, 1) * rangeX.clamp(0, double.infinity),
+      videoRect.top  + _pipMargin + fy.clamp(0, 1) * rangeY.clamp(0, double.infinity),
+    );
+  }
+
+  /// Convert absolute pixel offset back to fractional position.
+  (double, double) _absoluteToFrac(Offset o, Rect videoRect) {
+    final rangeX = videoRect.width  - _pipWidth  - _pipMargin * 2;
+    final rangeY = videoRect.height - _pipHeight - _pipMargin * 2;
+    if (rangeX <= 0 || rangeY <= 0) return (0.5, 0.5);
+    return (
+      ((o.dx - videoRect.left - _pipMargin) / rangeX).clamp(0.0, 1.0),
+      ((o.dy - videoRect.top  - _pipMargin) / rangeY).clamp(0.0, 1.0),
+    );
   }
 
   Offset _clamp(Offset o, Rect videoRect) => Offset(
@@ -98,14 +120,9 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
   );
 
   /// Store fractional PIP position for export.
-  void _updateExportPosition(Rect videoRect) {
-    final rangeX = videoRect.width  - _pipWidth  - _pipMargin * 2;
-    final rangeY = videoRect.height - _pipHeight - _pipMargin * 2;
-    if (rangeX <= 0 || rangeY <= 0) return;
-    final fx = (_pipOffset.dx - videoRect.left - _pipMargin) / rangeX;
-    final fy = (_pipOffset.dy - videoRect.top  - _pipMargin) / rangeY;
+  void _updateExportPosition() {
     ref.read(pipExportPositionProvider.notifier).state =
-        (fx.clamp(0.0, 1.0), fy.clamp(0.0, 1.0));
+        (_pipFracX < 0) ? (-1.0, -1.0) : (_pipFracX, _pipFracY);
   }
 
   @override
@@ -153,8 +170,10 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
           final vRect = _videoRect(bc, layout);
 
           // First time or after alignment change: snap to grid position
-          if (_pipOffset.dx < 0) {
-            _pipOffset = _defaultOffset(vRect, layout);
+          if (_pipFracX < 0) {
+            final (fx, fy) = _defaultFrac(layout);
+            _pipFracX = fx;
+            _pipFracY = fy;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 ref.read(pipExportPositionProvider.notifier).state = (-1.0, -1.0);
@@ -162,8 +181,8 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
             });
           }
 
-          // Re-clamp in case container/video size changed
-          _pipOffset = _clamp(_pipOffset, vRect);
+          // Convert fractional position to absolute pixels for this frame
+          final pipOffset = _fracToAbsolute(_pipFracX, _pipFracY, vRect);
 
           return Stack(clipBehavior: Clip.hardEdge, children: [
             // Main video fills everything
@@ -171,19 +190,22 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
 
             // Draggable PIP overlay
             Positioned(
-              left: _pipOffset.dx,
-              top:  _pipOffset.dy,
+              left: pipOffset.dx,
+              top:  pipOffset.dy,
               child: GestureDetector(
                 // Drag to reposition
                 onPanUpdate: (d) {
                   setState(() {
                     _isDragging = true;
-                    _pipOffset  = _clamp(_pipOffset + d.delta, vRect);
+                    final newAbs = _clamp(pipOffset + d.delta, vRect);
+                    final (fx, fy) = _absoluteToFrac(newAbs, vRect);
+                    _pipFracX = fx;
+                    _pipFracY = fy;
                   });
                 },
                 onPanEnd: (_) {
                   setState(() => _isDragging = false);
-                  _updateExportPosition(vRect);
+                  _updateExportPosition();
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 80),
@@ -225,18 +247,22 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
 
             // Resize handle (bottom-right corner)
             Positioned(
-              left: _pipOffset.dx + _pipWidth  - 20,
-              top:  _pipOffset.dy + _pipHeight - 20,
+              left: pipOffset.dx + _pipWidth  - 20,
+              top:  pipOffset.dy + _pipHeight - 20,
               child: GestureDetector(
                 onPanUpdate: (d) {
                   setState(() {
                     _pipWidth  = (_pipWidth  + d.delta.dx)
                         .clamp(_minPipW, _maxPipW);
                     _pipHeight = _pipWidth * (9 / 16); // maintain 16:9
-                    _pipOffset = _clamp(_pipOffset, vRect);
+                    // Re-derive fraction to keep position stable after resize
+                    final clamped = _clamp(pipOffset, vRect);
+                    final (fx, fy) = _absoluteToFrac(clamped, vRect);
+                    _pipFracX = fx;
+                    _pipFracY = fy;
                   });
                 },
-                onPanEnd: (_) => _updateExportPosition(vRect),
+                onPanEnd: (_) => _updateExportPosition(),
                 child: Container(
                   width: 24, height: 24,
                   decoration: BoxDecoration(

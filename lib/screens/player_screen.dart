@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 import '../models/layout_config.dart';
+import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
 import '../widgets/dual_video_view.dart';
@@ -17,8 +18,10 @@ import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
 import '../widgets/clip_list_drawer.dart';
 import '../widgets/map_dialog.dart';
+import '../widgets/shortcut_settings_dialog.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
+import '../services/thumbnail_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -70,12 +73,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _handleKey(KeyEvent event) {
-    // Shift-alone toggles fullscreen (on key release, only if not used as modifier)
+    final sc = ref.read(shortcutConfigProvider);
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+
+    // Shift-alone fullscreen: check on key-up if Shift is bound to fullscreen
     if (event is KeyUpEvent &&
         (event.logicalKey == LogicalKeyboardKey.shiftLeft ||
          event.logicalKey == LogicalKeyboardKey.shiftRight)) {
-      if (!_shiftUsedAsModifier) {
-        appLog('Shortcut', 'Shift – toggle fullscreen');
+      if (!_shiftUsedAsModifier &&
+          sc[ShortcutAction.fullscreen].keyId == 'shiftLeft') {
+        appLog('Shortcut', '${sc.label(ShortcutAction.fullscreen)} – toggle fullscreen');
         _toggleFullscreen();
       }
       _shiftUsedAsModifier = false;
@@ -86,22 +93,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     final key = event.logicalKey;
 
-    // Toggle shortcuts that work even when a drawer/dialog has focus
-    if (key == LogicalKeyboardKey.keyM &&
-        !HardwareKeyboard.instance.isShiftPressed) {
-      _toggleMapSidebar();
-      return;
-    } else if (key == LogicalKeyboardKey.keyC) {
-      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
-        Navigator.of(context).pop();
-      } else {
-        _scaffoldKey.currentState?.openDrawer();
+    // ── Escape is always hardwired ──
+    if (key == LogicalKeyboardKey.escape) {
+      if ((_scaffoldKey.currentState?.isDrawerOpen ?? false) &&
+          ref.read(clipSelectionModeProvider)) {
+        ref.read(clipSelectionModeProvider.notifier).state = false;
+        ref.read(selectedClipIndicesProvider.notifier).state = {};
+        return;
       }
-      return;
-    } else if (key == LogicalKeyboardKey.keyI) {
-      setState(() => _aboutOpen = !_aboutOpen);
-      return;
-    } else if (key == LogicalKeyboardKey.escape) {
       if (_aboutOpen) {
         setState(() => _aboutOpen = false);
       } else {
@@ -111,142 +110,192 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
-    // Don't handle remaining shortcuts when a text field or dialog has focus
+    // Look up which action this key corresponds to
+    final action = sc.actionFor(key, shift);
+
+    // ── Global shortcuts (work even in drawers/dialogs) ──
+    if (action == ShortcutAction.mapSidebar) {
+      _toggleMapSidebar();
+      return;
+    } else if (action == ShortcutAction.clipList) {
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      } else {
+        _scaffoldKey.currentState?.openDrawer();
+      }
+      return;
+    } else if (action == ShortcutAction.about) {
+      setState(() => _aboutOpen = !_aboutOpen);
+      return;
+    } else if (action == ShortcutAction.shortcutSettings) {
+      _showShortcutSettings();
+      return;
+    } else if (action == ShortcutAction.fullscreen &&
+               sc[ShortcutAction.fullscreen].keyId != 'shiftLeft') {
+      // Fullscreen remapped to a normal key (not Shift-alone)
+      _toggleFullscreen();
+      return;
+    }
+
+    // ── Drawer-only shortcuts ──
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      if (action == ShortcutAction.thumbnailToggle) {
+        final cur = ref.read(clipViewModeProvider);
+        ref.read(clipViewModeProvider.notifier).state =
+            cur == ClipViewMode.text ? ClipViewMode.thumbnail : ClipViewMode.text;
+        return;
+      } else if (action == ShortcutAction.selectMode) {
+        final next = !ref.read(clipSelectionModeProvider);
+        ref.read(clipSelectionModeProvider.notifier).state = next;
+        if (!next) ref.read(selectedClipIndicesProvider.notifier).state = {};
+        return;
+      } else if (action == ShortcutAction.selectAll &&
+                 ref.read(clipSelectionModeProvider)) {
+        final pairs = ref.read(videoPairListProvider);
+        final sel = ref.read(selectedClipIndicesProvider);
+        ref.read(selectedClipIndicesProvider.notifier).state =
+            sel.length == pairs.length
+                ? {}
+                : Set.of(List.generate(pairs.length, (i) => i));
+        return;
+      }
+    }
+
+    // ── Remaining shortcuts require primary focus ──
     if (!_focusNode.hasPrimaryFocus) return;
 
     final playback = ref.read(playbackProvider);
     final notifier = ref.read(playbackProvider.notifier);
-    final shift    = HardwareKeyboard.instance.isShiftPressed;
 
-    // Mark shift as used with another key (so Shift release won't toggle fullscreen)
+    // Mark shift as modifier so Shift-alone doesn't fire
     if (shift &&
         key != LogicalKeyboardKey.shiftLeft &&
         key != LogicalKeyboardKey.shiftRight) {
       _shiftUsedAsModifier = true;
     }
 
-    if (key == LogicalKeyboardKey.space && playback.isLoaded) {
-      appLog('Shortcut', 'Space – toggle play/pause');
-      notifier.togglePlay();
-    } else if (key == LogicalKeyboardKey.arrowRight && playback.isLoaded) {
-      appLog('Shortcut', 'Right arrow – seek +10s');
-      notifier.seekRelative(const Duration(seconds: 10));
-    } else if (key == LogicalKeyboardKey.arrowLeft && playback.isLoaded) {
-      appLog('Shortcut', 'Left arrow – seek -10s');
-      notifier.seekRelative(const Duration(seconds: -10));
-    } else if ((key == LogicalKeyboardKey.period && shift) ||
-               key == LogicalKeyboardKey.greater) {
-      appLog('Shortcut', 'Shift+. – next clip');
-      _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true);
-    } else if ((key == LogicalKeyboardKey.comma && shift) ||
-               key == LogicalKeyboardKey.less) {
-      appLog('Shortcut', 'Shift+, – previous clip');
-      _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true);
-    } else if (key == LogicalKeyboardKey.keyF) {
-      // 'F': mute front (paired) or mute single camera
-      if (playback.isLoaded && playback.hasFront && !playback.hasBack) {
-        final next = !ref.read(frontMutedProvider);
-        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} (single)');
-        ref.read(frontMutedProvider.notifier).state = next;
-        notifier.setFrontMuted(next);
-      } else if (playback.isLoaded && !playback.hasFront && playback.hasBack) {
+    if (action == null) return;
+
+    switch (action) {
+      case ShortcutAction.playPause:
+        if (!playback.isLoaded) return;
+        appLog('Shortcut', '${sc.label(action)} – toggle play/pause');
+        notifier.togglePlay();
+      case ShortcutAction.seekForward:
+        if (!playback.isLoaded) return;
+        appLog('Shortcut', '${sc.label(action)} – seek +10s');
+        notifier.seekRelative(const Duration(seconds: 10));
+      case ShortcutAction.seekBackward:
+        if (!playback.isLoaded) return;
+        appLog('Shortcut', '${sc.label(action)} – seek -10s');
+        notifier.seekRelative(const Duration(seconds: -10));
+      case ShortcutAction.nextClip:
+        appLog('Shortcut', '${sc.label(action)} – next clip');
+        _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true);
+      case ShortcutAction.previousClip:
+        appLog('Shortcut', '${sc.label(action)} – previous clip');
+        _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true);
+      case ShortcutAction.muteFront:
+        if (!playback.isLoaded) return;
+        if (playback.hasFront && !playback.hasBack) {
+          final next = !ref.read(frontMutedProvider);
+          ref.read(frontMutedProvider.notifier).state = next;
+          notifier.setFrontMuted(next);
+        } else if (!playback.hasFront && playback.hasBack) {
+          final next = !ref.read(backMutedProvider);
+          ref.read(backMutedProvider.notifier).state = next;
+          notifier.setBackMuted(next);
+        } else {
+          final next = !ref.read(frontMutedProvider);
+          ref.read(frontMutedProvider.notifier).state = next;
+          notifier.setFrontMuted(next);
+        }
+      case ShortcutAction.muteBack:
+        if (!playback.isLoaded) return;
         final next = !ref.read(backMutedProvider);
-        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} (single)');
         ref.read(backMutedProvider.notifier).state = next;
         notifier.setBackMuted(next);
-      } else {
-        final next = !ref.read(frontMutedProvider);
-        appLog('Shortcut', 'F – ${next ? "mute" : "unmute"} front');
-        ref.read(frontMutedProvider.notifier).state = next;
-        notifier.setFrontMuted(next);
-      }
-    } else if (key == LogicalKeyboardKey.keyB) {
-      final next = !ref.read(backMutedProvider);
-      appLog('Shortcut', 'B – ${next ? "mute" : "unmute"} back');
-      ref.read(backMutedProvider.notifier).state = next;
-      notifier.setBackMuted(next);
-    } else if (key == LogicalKeyboardKey.keyO) {
-      appLog('Shortcut', 'O – open folder');
-      _pickFolder();
-    } else if (key == LogicalKeyboardKey.keyL &&
-               playback.hasFront && playback.hasBack) {
-      appLog('Shortcut', 'L – layout selector');
-      _showLayoutPopup();
-    } else if (key == LogicalKeyboardKey.digit1 &&
-               playback.hasFront && playback.hasBack) {
-      appLog('Shortcut', '1 – Side by side');
-      ref.read(layoutConfigProvider.notifier).state =
-          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.sideBySide);
-    } else if (key == LogicalKeyboardKey.digit2 &&
-               playback.hasFront && playback.hasBack) {
-      appLog('Shortcut', '2 – Stacked');
-      ref.read(layoutConfigProvider.notifier).state =
-          ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.stacked);
-    } else if (key == LogicalKeyboardKey.digit3 &&
-               playback.hasFront && playback.hasBack) {
-      final config = ref.read(layoutConfigProvider);
-      if (config.mode != LayoutMode.pip) {
-        appLog('Shortcut', '3 – PIP (front main)');
+      case ShortcutAction.speedUp:
+        if (!playback.isLoaded) return;
+        final cur = ref.read(playbackSpeedProvider);
+        final idx = playbackSpeeds.indexOf(cur);
+        if (idx < playbackSpeeds.length - 1) {
+          final next = playbackSpeeds[idx + 1];
+          ref.read(playbackSpeedProvider.notifier).state = next;
+          notifier.setSpeed(next);
+        }
+      case ShortcutAction.speedDown:
+        if (!playback.isLoaded) return;
+        final cur = ref.read(playbackSpeedProvider);
+        final idx = playbackSpeeds.indexOf(cur);
+        if (idx > 0) {
+          final next = playbackSpeeds[idx - 1];
+          ref.read(playbackSpeedProvider.notifier).state = next;
+          notifier.setSpeed(next);
+        }
+      case ShortcutAction.speedReset:
+        if (!playback.isLoaded) return;
+        ref.read(playbackSpeedProvider.notifier).state = 1.0;
+        notifier.setSpeed(1.0);
+      case ShortcutAction.layoutSideBySide:
+        if (!playback.hasFront || !playback.hasBack) return;
         ref.read(layoutConfigProvider.notifier).state =
-            config.copyWith(mode: LayoutMode.pip, pipPrimary: PipPrimary.front);
-      } else {
-        // Already PIP — swap primary
-        final next = config.pipPrimary == PipPrimary.front
-            ? PipPrimary.back
-            : PipPrimary.front;
-        appLog('Shortcut', '3 – PIP swap → ${next.name} main');
+            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.sideBySide);
+      case ShortcutAction.layoutStacked:
+        if (!playback.hasFront || !playback.hasBack) return;
         ref.read(layoutConfigProvider.notifier).state =
-            config.copyWith(pipPrimary: next);
-      }
-    } else if (key == LogicalKeyboardKey.keyR) {
-      appLog('Shortcut', 'R – toggle sort order');
-      final current = ref.read(sortOrderProvider);
-      final next    = current == SortOrder.oldestFirst
-          ? SortOrder.newestFirst
-          : SortOrder.oldestFirst;
-      ref.read(sortOrderProvider.notifier).state = next;
-      ref.read(videoPairListProvider.notifier).applySort(next);
-      ref.read(currentIndexProvider.notifier).state = 0;
-    } else if (key == LogicalKeyboardKey.keyS && playback.isLoaded) {
-      appLog('Shortcut', 'S – save clips');
-      _saveClip();
-    } else if (key == LogicalKeyboardKey.keyE && playback.isLoaded) {
-      appLog('Shortcut', 'E – export');
-      _confirmExport();
-    } else if (key == LogicalKeyboardKey.keyW) {
-      appLog('Shortcut', 'W – close folder');
-      _confirmCloseFolder();
-    } else if (key == LogicalKeyboardKey.keyQ && !shift) {
-      appLog('Shortcut', 'Q – quit app');
-      _confirmQuit();
-    } else if (key == LogicalKeyboardKey.f11) {
-      appLog('Shortcut', 'F11 – toggle fullscreen');
-      _toggleFullscreen();
-    } else if (key == LogicalKeyboardKey.bracketRight && playback.isLoaded) {
-      // ] — increase speed
-      final current = ref.read(playbackSpeedProvider);
-      final idx = playbackSpeeds.indexOf(current);
-      if (idx < playbackSpeeds.length - 1) {
-        final next = playbackSpeeds[idx + 1];
-        appLog('Shortcut', '] – speed ${next}x');
-        ref.read(playbackSpeedProvider.notifier).state = next;
-        notifier.setSpeed(next);
-      }
-    } else if (key == LogicalKeyboardKey.bracketLeft && playback.isLoaded) {
-      // [ — decrease speed
-      final current = ref.read(playbackSpeedProvider);
-      final idx = playbackSpeeds.indexOf(current);
-      if (idx > 0) {
-        final next = playbackSpeeds[idx - 1];
-        appLog('Shortcut', '[ – speed ${next}x');
-        ref.read(playbackSpeedProvider.notifier).state = next;
-        notifier.setSpeed(next);
-      }
-    } else if (key == LogicalKeyboardKey.backslash && playback.isLoaded) {
-      // \ — reset speed to 1x
-      appLog('Shortcut', '\\ – speed reset to 1x');
-      ref.read(playbackSpeedProvider.notifier).state = 1.0;
-      notifier.setSpeed(1.0);
+            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.stacked);
+      case ShortcutAction.layoutPip:
+        if (!playback.hasFront || !playback.hasBack) return;
+        final config = ref.read(layoutConfigProvider);
+        if (config.mode != LayoutMode.pip) {
+          ref.read(layoutConfigProvider.notifier).state =
+              config.copyWith(mode: LayoutMode.pip, pipPrimary: PipPrimary.front);
+        } else {
+          final next = config.pipPrimary == PipPrimary.front
+              ? PipPrimary.back : PipPrimary.front;
+          ref.read(layoutConfigProvider.notifier).state =
+              config.copyWith(pipPrimary: next);
+        }
+      case ShortcutAction.layoutPopup:
+        if (!playback.hasFront || !playback.hasBack) return;
+        _showLayoutPopup();
+      case ShortcutAction.fullscreenAlt:
+        _toggleFullscreen();
+      case ShortcutAction.openFolder:
+        _pickFolder();
+      case ShortcutAction.saveClips:
+        if (!playback.isLoaded) return;
+        _saveClip();
+      case ShortcutAction.deleteClips:
+        if (!playback.isLoaded) return;
+        _deleteClips();
+      case ShortcutAction.exportVideo:
+        if (!playback.isLoaded) return;
+        _confirmExport();
+      case ShortcutAction.closeFolder:
+        _confirmCloseFolder();
+      case ShortcutAction.toggleSort:
+        final cur = ref.read(sortOrderProvider);
+        final next = cur == SortOrder.oldestFirst
+            ? SortOrder.newestFirst : SortOrder.oldestFirst;
+        ref.read(sortOrderProvider.notifier).state = next;
+        ref.read(videoPairListProvider.notifier).applySort(next);
+        ref.read(currentIndexProvider.notifier).state = 0;
+      case ShortcutAction.quit:
+        _confirmQuit();
+      // These are handled above in global/drawer sections
+      case ShortcutAction.fullscreen:
+        _toggleFullscreen();
+      case ShortcutAction.shortcutSettings:
+        _showShortcutSettings();
+      case ShortcutAction.clipList:
+      case ShortcutAction.mapSidebar:
+      case ShortcutAction.about:
+      case ShortcutAction.thumbnailToggle:
+      case ShortcutAction.selectMode:
+      case ShortcutAction.selectAll:
+        break;
     }
   }
 
@@ -355,6 +404,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     notifier.onClipEnd = _onClipEnd;
     await notifier.loadPair(pairs.first, 0, autoPlay: false);
     _focusNode.requestFocus();
+
+    // Pre-generate thumbnails in background
+    final thumbPaths = <String>[];
+    for (final p in pairs) {
+      final vp = p.frontPath ?? p.backPath;
+      if (vp != null) thumbPaths.add(vp);
+    }
+    ThumbnailService.pregenerate(thumbPaths);
   }
 
   void _toggleMapSidebar() {
@@ -383,17 +440,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (pairs.isEmpty) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Close Folder', style: TextStyle(color: Colors.white, fontSize: 16)),
-        content: Text('Close the current folder with ${pairs.length} clips?',
-            style: const TextStyle(color: Colors.white70, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Close', style: TextStyle(color: Colors.redAccent))),
-        ],
+      builder: (ctx) => _ConfirmDialog(
+        title: 'Close Folder',
+        message: 'Close the current folder with ${pairs.length} clips?',
+        confirmLabel: 'Close',
+        confirmColor: Colors.redAccent,
       ),
     );
     if (ok != true) { _focusNode.requestFocus(); return; }
@@ -411,17 +462,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   Future<void> _confirmQuit() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Quit Application', style: TextStyle(color: Colors.white, fontSize: 16)),
-        content: const Text('Are you sure you want to quit?',
-            style: TextStyle(color: Colors.white70, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Quit', style: TextStyle(color: Colors.redAccent))),
-        ],
+      builder: (ctx) => const _ConfirmDialog(
+        title: 'Quit Application',
+        message: 'Are you sure you want to quit?',
+        confirmLabel: 'Quit',
+        confirmColor: Colors.redAccent,
       ),
     );
     if (ok != true) { _focusNode.requestFocus(); return; }
@@ -437,17 +482,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (ref.read(exportProgressProvider) != null) return; // already exporting
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Export Video', style: TextStyle(color: Colors.white, fontSize: 16)),
-        content: Text('Export clip "${pair.id}" with current layout settings?',
-            style: const TextStyle(color: Colors.white70, fontSize: 13)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Export', style: TextStyle(color: Color(0xFF4FC3F7)))),
-        ],
+      builder: (ctx) => _ConfirmDialog(
+        title: 'Export Video',
+        message: 'Export clip "${pair.id}" with current layout settings?',
+        confirmLabel: 'Export',
+        confirmColor: const Color(0xFF4FC3F7),
       ),
     );
     _focusNode.requestFocus();
@@ -501,6 +540,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   void _showAbout() {
     setState(() => _aboutOpen = !_aboutOpen);
+  }
+
+  void _showShortcutSettings() {
+    showDialog(
+      context: context,
+      builder: (_) => const ShortcutSettingsDialog(),
+    ).then((_) => _focusNode.requestFocus());
   }
 
   Future<void> _saveClip() async {
@@ -566,6 +612,167 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _focusNode.requestFocus();
   }
 
+  /// Delete clips — shows confirmation dialog, then deletes from disk and list.
+  /// If [indices] is null, shows a selection dialog for current clip.
+  Future<void> _deleteClips({Set<int>? indices}) async {
+    final pairs = ref.read(videoPairListProvider);
+    if (pairs.isEmpty) return;
+
+    final currentIdx = ref.read(currentIndexProvider);
+
+    // If no indices provided, prompt the user to select from a dialog
+    final toDelete = indices ?? await showDialog<Set<int>>(
+      context: context,
+      builder: (_) => _DeleteClipDialog(
+        pairs: pairs,
+        initialSelected: {currentIdx},
+      ),
+    );
+    if (toDelete == null || toDelete.isEmpty) {
+      _focusNode.requestFocus();
+      return;
+    }
+
+    // Count total files
+    int totalFiles = 0;
+    for (final idx in toDelete) {
+      final pair = pairs[idx];
+      if (pair.hasFront) totalFiles++;
+      if (pair.hasBack)  totalFiles++;
+    }
+
+    // Confirmation dialog
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _ConfirmDialog(
+        title: 'Delete Clips',
+        message: 'Permanently delete ${toDelete.length} clip${toDelete.length > 1 ? "s" : ""}'
+            ' ($totalFiles file${totalFiles > 1 ? "s" : ""}) from disk?\n\n'
+            'This cannot be undone.',
+        confirmLabel: 'Delete',
+        confirmColor: Colors.redAccent,
+      ),
+    );
+
+    if (ok != true) {
+      _focusNode.requestFocus();
+      return;
+    }
+
+    // Delete files from disk
+    int deleted = 0, failed = 0;
+    for (final idx in toDelete) {
+      final pair = pairs[idx];
+      for (final file in [pair.frontFile, pair.backFile]) {
+        if (file == null) continue;
+        try {
+          if (await file.exists()) {
+            await file.delete();
+            deleted++;
+          }
+        } catch (e) {
+          debugPrint('Delete failed: $e');
+          failed++;
+        }
+      }
+    }
+
+    appLog('Delete', 'Deleted $deleted file(s), $failed failed');
+
+    // Remove from list
+    ref.read(videoPairListProvider.notifier).removePairs(toDelete);
+
+    // Clear selection mode
+    ref.read(clipSelectionModeProvider.notifier).state = false;
+    ref.read(selectedClipIndicesProvider.notifier).state = {};
+
+    // Fix current index
+    final remaining = ref.read(videoPairListProvider);
+    if (remaining.isEmpty) {
+      ref.read(playbackProvider.notifier).stop();
+      ref.read(currentIndexProvider.notifier).state = 0;
+    } else {
+      final newIdx = currentIdx.clamp(0, remaining.length - 1);
+      ref.read(currentIndexProvider.notifier).state = newIdx;
+      await ref.read(playbackProvider.notifier)
+          .loadPair(remaining[newIdx], 0, autoPlay: false);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Deleted $deleted file${deleted != 1 ? "s" : ""}'
+            '${failed > 0 ? " ($failed failed)" : ""}'),
+        duration: const Duration(seconds: 3),
+      ));
+    }
+    _focusNode.requestFocus();
+  }
+
+  /// Called from the drawer's save button — uses the drawer's selection.
+  Future<void> _saveFromDrawer() async {
+    final selected = ref.read(selectedClipIndicesProvider);
+    if (selected.isEmpty) return;
+
+    final pairs = ref.read(videoPairListProvider);
+
+    // Close drawer
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+
+    // Pick save location
+    final outDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select folder to save clips',
+    );
+    if (outDir == null) {
+      _focusNode.requestFocus();
+      return;
+    }
+
+    int totalFiles = 0;
+    for (final idx in selected) {
+      final pair = pairs[idx];
+      if (pair.hasFront) totalFiles++;
+      if (pair.hasBack)  totalFiles++;
+    }
+
+    int copied = 0, failed = 0;
+    ref.read(savingClipsProvider.notifier).state = '0/$totalFiles saved';
+
+    for (final idx in selected) {
+      final pair = pairs[idx];
+      for (final file in [pair.frontFile, pair.backFile]) {
+        if (file == null) continue;
+        try {
+          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+          await file.copy(dest);
+          copied++;
+          ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
+        } catch (e) {
+          debugPrint('Copy failed: $e');
+          failed++;
+        }
+      }
+    }
+
+    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    ref.read(savingClipsProvider.notifier).state = null;
+
+    // Clear selection
+    ref.read(clipSelectionModeProvider.notifier).state = false;
+    ref.read(selectedClipIndicesProvider.notifier).state = {};
+    _focusNode.requestFocus();
+  }
+
+  /// Called from the drawer's delete button.
+  Future<void> _deleteFromDrawer(Set<int> indices) async {
+    // Close drawer first
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+    await _deleteClips(indices: indices);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pairs = ref.watch(videoPairListProvider);
@@ -589,6 +796,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           onSelect: (i) {
             _goTo(i, autoPlay: true);
           },
+          onSave:   _saveFromDrawer,
+          onDelete:  _deleteFromDrawer,
         ),
         endDrawer: MapSidebar(
           videoPath: mapVideoPath,
@@ -606,6 +815,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     isFullscreen:       _isFullscreen,
                     onToggleFullscreen: _toggleFullscreen,
                     onAbout:            _showAbout,
+                    onShortcutSettings: _showShortcutSettings,
                   )
                 : const SizedBox.shrink(),
           ),
@@ -670,20 +880,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
 // ─── Minimal top bar ──────────────────────────────────────────────────────────
 
-class _MinimalTopBar extends StatelessWidget {
+class _MinimalTopBar extends ConsumerWidget {
   final int          clipCount;
   final bool         isFullscreen;
   final VoidCallback onToggleFullscreen;
   final VoidCallback? onAbout;
+  final VoidCallback? onShortcutSettings;
   const _MinimalTopBar({
     required this.clipCount,
     required this.isFullscreen,
     required this.onToggleFullscreen,
     this.onAbout,
+    this.onShortcutSettings,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sc = ref.watch(shortcutConfigProvider);
+
     return Container(
       color: const Color(0xCC000000),
       padding: EdgeInsets.only(
@@ -695,7 +909,7 @@ class _MinimalTopBar extends StatelessWidget {
           builder: (ctx) => IconButton(
             icon:    const Icon(Icons.menu_rounded, color: Colors.white60),
             onPressed: () => Scaffold.of(ctx).openDrawer(),
-            tooltip: 'Clip list (C)',
+            tooltip: 'Clip list (${sc.label(ShortcutAction.clipList)})',
             iconSize: 20,
           ),
         ),
@@ -716,7 +930,18 @@ class _MinimalTopBar extends StatelessWidget {
         ],
         const Spacer(),
         Tooltip(
-          message: 'About (I)',
+          message: 'Keyboard shortcuts',
+          child: IconButton(
+            icon: const Icon(Icons.keyboard_rounded, color: Colors.white38),
+            onPressed: onShortcutSettings,
+            iconSize: 18,
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(),
+          ),
+        ),
+        const SizedBox(width: 2),
+        Tooltip(
+          message: 'About (${sc.label(ShortcutAction.about)})',
           child: IconButton(
             icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
             onPressed: onAbout,
@@ -727,7 +952,9 @@ class _MinimalTopBar extends StatelessWidget {
         ),
         const SizedBox(width: 2),
         Tooltip(
-          message: isFullscreen ? 'Exit fullscreen (Shift)' : 'Fullscreen (Shift)',
+          message: isFullscreen
+              ? 'Exit fullscreen (${sc.label(ShortcutAction.fullscreen)})'
+              : 'Fullscreen (${sc.label(ShortcutAction.fullscreen)})',
           child: IconButton(
             icon: Icon(
               isFullscreen
@@ -745,7 +972,6 @@ class _MinimalTopBar extends StatelessWidget {
       ]),
     );
   }
-
 }
 
 // ─── About panel (in-widget overlay, not a dialog) ───────────────────────────
@@ -837,14 +1063,63 @@ class _Af extends StatelessWidget {
   }
 }
 
+// ─── Confirmation dialog with Enter/Escape support ──────────────────────────
+
+class _ConfirmDialog extends StatelessWidget {
+  final String title;
+  final String message;
+  final String confirmLabel;
+  final Color confirmColor;
+
+  const _ConfirmDialog({
+    required this.title,
+    required this.message,
+    required this.confirmLabel,
+    required this.confirmColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      onKeyEvent: (event) {
+        if (event is! KeyDownEvent) return;
+        if (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+          Navigator.pop(context, true);
+        }
+      },
+      child: AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Text(title,
+            style: const TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text(message,
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(confirmLabel, style: TextStyle(color: confirmColor)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Landing page (empty state) ─────────────────────────────────────────────
 
-class _EmptyState extends StatelessWidget {
+class _EmptyState extends ConsumerWidget {
   final VoidCallback onOpen;
   const _EmptyState({required this.onOpen});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sc = ref.watch(shortcutConfigProvider);
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
@@ -910,16 +1185,16 @@ class _EmptyState extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _sectionLabel('Playback'),
-                      _kb('Space', 'Play / Pause'),
-                      _kb('\u2190 \u2192', 'Seek \u00b110s'),
-                      _kb('Shift+.', 'Next clip'),
-                      _kb('Shift+,', 'Previous clip'),
-                      _kb('[ / ]', 'Speed down / up'),
-                      _kb('\\', 'Reset speed 1x'),
+                      _kb(sc.label(ShortcutAction.playPause), 'Play / Pause'),
+                      _kb('${sc.label(ShortcutAction.seekBackward)} ${sc.label(ShortcutAction.seekForward)}', 'Seek \u00b110s'),
+                      _kb(sc.label(ShortcutAction.nextClip), 'Next clip'),
+                      _kb(sc.label(ShortcutAction.previousClip), 'Previous clip'),
+                      _kb('${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)}', 'Speed down / up'),
+                      _kb(sc.label(ShortcutAction.speedReset), 'Reset speed 1x'),
                       const SizedBox(height: 10),
                       _sectionLabel('Audio'),
-                      _kb('F', 'Mute front'),
-                      _kb('B', 'Mute back'),
+                      _kb(sc.label(ShortcutAction.muteFront), 'Mute front'),
+                      _kb(sc.label(ShortcutAction.muteBack), 'Mute back'),
                     ],
                   )),
                   const SizedBox(width: 16),
@@ -928,16 +1203,19 @@ class _EmptyState extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _sectionLabel('Layout'),
-                      _kb('1', 'Side by side'),
-                      _kb('2', 'Stacked'),
-                      _kb('3', 'PIP (toggle primary)'),
-                      _kb('L', 'Layout popup'),
-                      _kb('Shift', 'Fullscreen'),
+                      _kb(sc.label(ShortcutAction.layoutSideBySide), 'Side by side'),
+                      _kb(sc.label(ShortcutAction.layoutStacked), 'Stacked'),
+                      _kb(sc.label(ShortcutAction.layoutPip), 'PIP (toggle primary)'),
+                      _kb(sc.label(ShortcutAction.layoutPopup), 'Layout popup'),
+                      _kb(sc.label(ShortcutAction.fullscreen), 'Fullscreen'),
                       const SizedBox(height: 10),
                       _sectionLabel('Panels'),
-                      _kb('C', 'Clip list'),
-                      _kb('M', 'Map sidebar'),
-                      _kb('I', 'About'),
+                      _kb(sc.label(ShortcutAction.clipList), 'Clip list'),
+                      _kb(sc.label(ShortcutAction.thumbnailToggle), 'List / Thumbnails'),
+                      _kb(sc.label(ShortcutAction.selectMode), 'Select mode'),
+                      _kb(sc.label(ShortcutAction.selectAll), 'Select all'),
+                      _kb(sc.label(ShortcutAction.mapSidebar), 'Map sidebar'),
+                      _kb(sc.label(ShortcutAction.about), 'About'),
                     ],
                   )),
                   const SizedBox(width: 16),
@@ -946,14 +1224,16 @@ class _EmptyState extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _sectionLabel('File'),
-                      _kb('O', 'Open folder'),
-                      _kb('S', 'Save clips'),
-                      _kb('E', 'Export video'),
-                      _kb('W', 'Close folder'),
-                      _kb('R', 'Toggle sort'),
+                      _kb(sc.label(ShortcutAction.openFolder), 'Open folder'),
+                      _kb(sc.label(ShortcutAction.saveClips), 'Save clips'),
+                      _kb(sc.label(ShortcutAction.deleteClips), 'Delete clips'),
+                      _kb(sc.label(ShortcutAction.exportVideo), 'Export video'),
+                      _kb(sc.label(ShortcutAction.closeFolder), 'Close folder'),
+                      _kb(sc.label(ShortcutAction.toggleSort), 'Toggle sort'),
                       const SizedBox(height: 10),
                       _sectionLabel('App'),
-                      _kb('Q', 'Quit'),
+                      _kb(sc.label(ShortcutAction.quit), 'Quit'),
+                      _kb(sc.label(ShortcutAction.shortcutSettings), 'Shortcuts'),
                       _kb('Esc', 'Close overlay'),
                     ],
                   )),
@@ -1158,6 +1438,181 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4FC3F7),
                   foregroundColor: Colors.black,
+                  disabledBackgroundColor: Colors.white12,
+                  disabledForegroundColor: Colors.white24,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Delete clip dialog (D shortcut) ────────────────────────────────────────
+
+class _DeleteClipDialog extends StatefulWidget {
+  final List<VideoPair> pairs;
+  final Set<int> initialSelected;
+  const _DeleteClipDialog({required this.pairs, required this.initialSelected});
+
+  @override
+  State<_DeleteClipDialog> createState() => _DeleteClipDialogState();
+}
+
+class _DeleteClipDialogState extends State<_DeleteClipDialog> {
+  late final Set<int> _selected;
+  final _fmt = DateFormat('MMM d, yyyy  HH:mm:ss');
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = Set.of(widget.initialSelected);
+  }
+
+  int get _totalFiles {
+    int count = 0;
+    for (final idx in _selected) {
+      final p = widget.pairs[idx];
+      if (p.hasFront) count++;
+      if (p.hasBack) count++;
+    }
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 520),
+        child: Column(children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF222222),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Delete Clips',
+                  style: TextStyle(color: Colors.white, fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  if (_selected.length == widget.pairs.length) {
+                    _selected.clear();
+                  } else {
+                    _selected.addAll(
+                      List.generate(widget.pairs.length, (i) => i));
+                  }
+                }),
+                child: Text(
+                  _selected.length == widget.pairs.length
+                      ? 'Deselect all'
+                      : 'Select all',
+                  style: const TextStyle(fontSize: 11, color: Colors.redAccent),
+                ),
+              ),
+            ]),
+          ),
+
+          // Clip list
+          Expanded(
+            child: ListView.builder(
+              itemCount: widget.pairs.length,
+              itemBuilder: (_, i) {
+                final pair = widget.pairs[i];
+                final checked = _selected.contains(i);
+                final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final badge = pair.isPaired
+                    ? 'F+B'
+                    : pair.hasFront
+                        ? 'F only'
+                        : 'B only';
+                final badgeColor = pair.isPaired
+                    ? const Color(0xFF4FC3F7)
+                    : pair.hasFront
+                        ? Colors.orange
+                        : Colors.purple;
+
+                return CheckboxListTile(
+                  value: checked,
+                  activeColor: Colors.redAccent,
+                  onChanged: (v) => setState(() {
+                    if (v == true) {
+                      _selected.add(i);
+                    } else {
+                      _selected.remove(i);
+                    }
+                  }),
+                  title: Text(
+                    _fmt.format(pair.timestamp),
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  subtitle: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.15),
+                        border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(badge,
+                        style: TextStyle(color: badgeColor, fontSize: 10,
+                            fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('$fileCount file${fileCount > 1 ? "s" : ""}',
+                      style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                    if (pair.isLocked) ...[
+                      const SizedBox(width: 4),
+                      const Text('locked',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                    ],
+                  ]),
+                  dense: true,
+                );
+              },
+            ),
+          ),
+
+          // Footer with delete button
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF222222),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+            ),
+            child: Row(children: [
+              Text(
+                '${_selected.length} clip${_selected.length != 1 ? "s" : ""}'
+                ' selected  ($_totalFiles file${_totalFiles != 1 ? "s" : ""})',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('Cancel',
+                    style: TextStyle(color: Colors.white38)),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _selected.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(_selected),
+                icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                label: const Text('Delete'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.white12,
                   disabledForegroundColor: Colors.white24,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

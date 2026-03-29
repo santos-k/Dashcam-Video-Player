@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/app_providers.dart';
 import '../models/layout_config.dart';
+import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../services/export_service.dart';
 
@@ -56,6 +57,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     final saveProgress = ref.watch(savingClipsProvider);
     final isSaving     = saveProgress != null;
     final notifier    = ref.read(playbackProvider.notifier);
+    final sc          = ref.watch(shortcutConfigProvider);
 
     final hasPrev  = index > 0;
     final hasNext  = index < pairs.length - 1;
@@ -94,7 +96,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             label: sortOrder == SortOrder.oldestFirst
                 ? 'Oldest first'
                 : 'Newest first',
-            tooltip: 'Toggle sort order (R)',
+            tooltip: 'Toggle sort order (${sc.label(ShortcutAction.toggleSort)})',
             onPressed: () {
               final next = sortOrder == SortOrder.oldestFirst
                   ? SortOrder.newestFirst
@@ -111,7 +113,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           if (playback.hasFront && playback.hasBack) ...[
             _MuteBtn(
               label:   'F',
-              tooltip: frontMuted ? 'Unmute front camera (F)' : 'Mute front camera (F)',
+              tooltip: frontMuted ? 'Unmute front camera (${sc.label(ShortcutAction.muteFront)})' : 'Mute front camera (${sc.label(ShortcutAction.muteFront)})',
               muted:   frontMuted,
               onTap: () {
                 final next = !frontMuted;
@@ -123,7 +125,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             const SizedBox(width: 4),
             _MuteBtn(
               label:   'B',
-              tooltip: backMuted ? 'Unmute back camera (B)' : 'Mute back camera (B)',
+              tooltip: backMuted ? 'Unmute back camera (${sc.label(ShortcutAction.muteBack)})' : 'Mute back camera (${sc.label(ShortcutAction.muteBack)})',
               muted:   backMuted,
               onTap: () {
                 final next = !backMuted;
@@ -136,7 +138,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ] else if (playback.hasFront) ...[
             _MuteBtn(
               label:   'Mute',
-              tooltip: frontMuted ? 'Unmute (M)' : 'Mute (M)',
+              tooltip: frontMuted ? 'Unmute (${sc.label(ShortcutAction.muteFront)})' : 'Mute (${sc.label(ShortcutAction.muteFront)})',
               muted:   frontMuted,
               onTap: () {
                 final next = !frontMuted;
@@ -149,7 +151,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ] else if (playback.hasBack) ...[
             _MuteBtn(
               label:   'Mute',
-              tooltip: backMuted ? 'Unmute (M)' : 'Mute (M)',
+              tooltip: backMuted ? 'Unmute (${sc.label(ShortcutAction.muteBack)})' : 'Mute (${sc.label(ShortcutAction.muteBack)})',
               muted:   backMuted,
               onTap: () {
                 final next = !backMuted;
@@ -167,7 +169,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
               key:     widget.layoutBtnKey,
               icon:    Icons.view_quilt_rounded,
               label:   _layoutLabel(layout.mode),
-              tooltip: 'Change layout (L / 1-3)',
+              tooltip: 'Change layout (${sc.label(ShortcutAction.layoutPopup)})',
               onPressed: widget.onLayout,
             ),
           const SizedBox(width: 4),
@@ -176,7 +178,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           _ToolBtn(
             icon:    Icons.folder_open_rounded,
             label:   'Open',
-            tooltip: 'Open dashcam folder (O)',
+            tooltip: 'Open dashcam folder (${sc.label(ShortcutAction.openFolder)})',
             onPressed: widget.onFolder,
           ),
           const SizedBox(width: 4),
@@ -185,7 +187,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           _ToolBtn(
             icon:    Icons.map_rounded,
             label:   'Map',
-            tooltip: 'Show GPS location on map (M)',
+            tooltip: 'Show GPS location on map (${sc.label(ShortcutAction.mapSidebar)})',
             onPressed: () {
               widget.onMap?.call();
             },
@@ -214,7 +216,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           _ToolBtn(
             icon:    Icons.folder_off_rounded,
             label:   'Close Folder',
-            tooltip: 'Close loaded folder (W)',
+            tooltip: 'Close loaded folder (${sc.label(ShortcutAction.closeFolder)})',
             onPressed: () {
               widget.onCloseFolder?.call();
             },
@@ -225,7 +227,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           _ToolBtn(
             icon:    Icons.power_settings_new_rounded,
             label:   'Quit',
-            tooltip: 'Quit application (Q)',
+            tooltip: 'Quit application (${sc.label(ShortcutAction.quit)})',
             onPressed: () {
               widget.onQuit?.call();
             },
@@ -279,10 +281,10 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
         // ── Row 3: transport ──────────────────────────────
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           _NavBtn(icon: Icons.skip_previous_rounded,
-            enabled: hasPrev, tooltip: 'Previous (Shift+,)',
+            enabled: hasPrev, tooltip: 'Previous (${sc.label(ShortcutAction.previousClip)})',
             onPressed: () { widget.onPrevious(); widget.focusRequester?.call(); }),
           _NavBtn(icon: Icons.replay_10_rounded,
-            enabled: isLoaded, tooltip: 'Back 10s (←)',
+            enabled: isLoaded, tooltip: 'Back 10s (${sc.label(ShortcutAction.seekBackward)})',
             onPressed: () {
               notifier.seekRelative(const Duration(seconds: -10));
               widget.focusRequester?.call();
@@ -291,7 +293,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           const SizedBox(width: 8),
           // Play/Pause big button
           Tooltip(
-            message: 'Play / Pause (Space)',
+            message: 'Play / Pause (${sc.label(ShortcutAction.playPause)})',
             child: GestureDetector(
             onTap: isLoaded ? () { notifier.togglePlay(); widget.focusRequester?.call(); } : null,
             child: AnimatedContainer(
@@ -312,13 +314,13 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           const SizedBox(width: 8),
 
           _NavBtn(icon: Icons.forward_10_rounded,
-            enabled: isLoaded, tooltip: 'Forward 10s (→)',
+            enabled: isLoaded, tooltip: 'Forward 10s (${sc.label(ShortcutAction.seekForward)})',
             onPressed: () {
               notifier.seekRelative(const Duration(seconds: 10));
               widget.focusRequester?.call();
             }),
           _NavBtn(icon: Icons.skip_next_rounded,
-            enabled: hasNext, tooltip: 'Next (Shift+.)',
+            enabled: hasNext, tooltip: 'Next (${sc.label(ShortcutAction.nextClip)})',
             onPressed: () { widget.onNext(); widget.focusRequester?.call(); }),
 
           const SizedBox(width: 12),
@@ -464,7 +466,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
 
 // ─── Export button with progress ─────────────────────────────────────────────
 
-class _ExportBtn extends StatelessWidget {
+class _ExportBtn extends ConsumerWidget {
   final bool    enabled;
   final double? progress;
   final VoidCallback onExport;
@@ -476,11 +478,12 @@ class _ExportBtn extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isExporting = progress != null;
+    final sc = ref.watch(shortcutConfigProvider);
 
     return Tooltip(
-      message: 'Export current clip (E)',
+      message: 'Export current clip (${sc.label(ShortcutAction.exportVideo)})',
       child: GestureDetector(
         onTap: enabled ? onExport : null,
         child: AnimatedContainer(
@@ -657,16 +660,17 @@ class _MuteBtn extends StatelessWidget {
 
 // ─── Save button with spinner ────────────────────────────────────────────────
 
-class _SaveBtn extends StatelessWidget {
+class _SaveBtn extends ConsumerWidget {
   final bool isSaving;
   final String? progressText;
   final VoidCallback? onPressed;
   const _SaveBtn({required this.isSaving, this.progressText, required this.onPressed});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sc = ref.watch(shortcutConfigProvider);
     return Tooltip(
-      message: isSaving ? 'Saving...' : 'Save clip files to a folder (S)',
+      message: isSaving ? 'Saving...' : 'Save clip files to a folder (${sc.label(ShortcutAction.saveClips)})',
       child: GestureDetector(
         onTap: onPressed,
         child: AnimatedContainer(
@@ -758,12 +762,13 @@ class _SpeedBtn extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final speed = ref.watch(playbackSpeedProvider);
+    final sc    = ref.watch(shortcutConfigProvider);
     final isNormal = speed == 1.0;
 
     return PopupMenuButton<double>(
       onSelected: onChanged,
       enabled: enabled,
-      tooltip: 'Playback speed ([ / ])',
+      tooltip: 'Playback speed (${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)})',
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
       color: const Color(0xFF222222),
