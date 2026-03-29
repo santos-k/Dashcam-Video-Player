@@ -27,7 +27,7 @@ class ExportService {
     // Get duration for progress estimation
     Duration? duration;
     try {
-      duration = await _probeDuration(ffmpeg, pair.frontFile?.path ?? pair.backFile!.path);
+      duration = await _probeDuration(ffmpeg, pair.frontPath ?? pair.backPath!);
     } catch (_) {}
 
     final args = _buildArgs(pair, layout, syncOffsetMs, outputPath, pipPosition);
@@ -73,7 +73,7 @@ class ExportService {
 
     // Single video (no front or no back)
     if (!pair.isPaired) {
-      final input = pair.frontFile?.path ?? pair.backFile!.path;
+      final input = pair.frontPath ?? pair.backPath!;
       return ['-i', input, '-c:v', 'libx264', '-crf', '23',
               '-preset', 'fast', '-c:a', 'aac', '-y', outputPath];
     }
@@ -82,9 +82,9 @@ class ExportService {
 
     return [
       '-itsoffset', frontDelay,
-      '-i', pair.frontFile!.path,
+      '-i', pair.frontPath!,
       '-itsoffset', backDelay,
-      '-i', pair.backFile!.path,
+      '-i', pair.backPath!,
       '-filter_complex', filter,
       '-map', '[out]',
       '-map', '0:a?',

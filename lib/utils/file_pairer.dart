@@ -2,7 +2,9 @@
 
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import '../models/dashcam_file.dart';
 import '../models/video_pair.dart';
+import '../services/dashcam_service.dart';
 
 /// Scans a root drive/folder for dashcam video folders and pairs them.
 ///
@@ -182,6 +184,95 @@ class FilePairer {
       '${_p(ts.hour)}${_p(ts.minute)}${_p(ts.second)}';
 
   static String _p(int n) => n.toString().padLeft(2, '0');
+
+  // ── WiFi dashcam file pairing ─────────────────────────────────────────
+
+  /// Pair dashcam files from the WiFi API into VideoPairs.
+  /// Matches front/back files by timestamp with ±5 second tolerance,
+  /// same algorithm as local file pairing.
+  static List<VideoPair> pairFromDashcam(List<DashcamFile> files) {
+    final frontFiles = <DashcamFile>[];
+    final backFiles = <DashcamFile>[];
+
+    for (final file in files) {
+      if (file.isFront) {
+        frontFiles.add(file);
+      } else if (file.isBack) {
+        backFiles.add(file);
+      } else {
+        frontFiles.add(file); // unknown camera → treat as front
+      }
+    }
+
+    final baseUrl = DashcamService.baseUrl;
+    final pairs = <VideoPair>[];
+    final usedBack = <int>{};
+
+    // Match front files to nearest back file within tolerance
+    for (final front in frontFiles) {
+      final frontTs = front.timestamp ??
+          DateTime.fromMillisecondsSinceEpoch(front.createtime * 1000);
+
+      DashcamFile? bestBack;
+      int bestBackIdx = -1;
+      int bestDiff = _toleranceSeconds * 1000 + 1;
+
+      for (int i = 0; i < backFiles.length; i++) {
+        if (usedBack.contains(i)) continue;
+        final backTs = backFiles[i].timestamp ??
+            DateTime.fromMillisecondsSinceEpoch(backFiles[i].createtime * 1000);
+        final diff = frontTs.difference(backTs).inMilliseconds.abs();
+        if (diff <= _toleranceSeconds * 1000 && diff < bestDiff) {
+          bestDiff = diff;
+          bestBack = backFiles[i];
+          bestBackIdx = i;
+        }
+      }
+
+      if (bestBack != null) {
+        usedBack.add(bestBackIdx);
+        final backTs = bestBack.timestamp ??
+            DateTime.fromMillisecondsSinceEpoch(bestBack.createtime * 1000);
+        final syncOffsetMs = frontTs.difference(backTs).inMilliseconds;
+
+        pairs.add(VideoPair(
+          id: _formatId(frontTs),
+          frontUrl: '$baseUrl${front.path}',
+          backUrl: '$baseUrl${bestBack.path}',
+          timestamp: frontTs,
+          isLocked: front.folder == 'emr' || bestBack.folder == 'emr',
+          syncOffsetMs: syncOffsetMs,
+          source: 'wifi-${front.folder}',
+        ));
+      } else {
+        pairs.add(VideoPair(
+          id: _formatId(frontTs),
+          frontUrl: '$baseUrl${front.path}',
+          timestamp: frontTs,
+          isLocked: front.folder == 'emr',
+          source: 'wifi-${front.folder}',
+        ));
+      }
+    }
+
+    // Add unmatched back files
+    for (int i = 0; i < backFiles.length; i++) {
+      if (usedBack.contains(i)) continue;
+      final back = backFiles[i];
+      final backTs = back.timestamp ??
+          DateTime.fromMillisecondsSinceEpoch(back.createtime * 1000);
+      pairs.add(VideoPair(
+        id: _formatId(backTs),
+        backUrl: '$baseUrl${back.path}',
+        timestamp: backTs,
+        isLocked: back.folder == 'emr',
+        source: 'wifi-${back.folder}',
+      ));
+    }
+
+    pairs.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return pairs;
+  }
 
   /// Parses common dashcam timestamp formats:
   ///   YYYYMMDD_HHMMSS   (most common)

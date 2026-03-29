@@ -1,16 +1,18 @@
 // lib/providers/dashcam_providers.dart
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/dashcam_file.dart';
 import '../models/dashcam_state.dart';
 import '../services/dashcam_service.dart';
 import '../services/log_service.dart';
+import 'app_providers.dart';
 
 class DashcamNotifier extends StateNotifier<DashcamState> {
-  DashcamNotifier() : super(const DashcamState());
+  DashcamNotifier(this._ref) : super(const DashcamState());
+
+  final Ref _ref;
 
   Timer? _heartbeat;
 
@@ -22,12 +24,10 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
   /// Update the dashcam IP address.
   void setIp(String ip) {
     DashcamService.ip = ip;
-    DashcamFile.setIp(ip);
     appLog('Dashcam', 'IP set to $ip');
   }
 
   Future<void> connect() async {
-    DashcamFile.setIp(DashcamService.ip); // sync
     state = state.copyWith(
         status: DashcamConnectionStatus.connecting, clearError: true);
     appLog('Dashcam', 'Connecting to ${DashcamService.ip}...');
@@ -43,7 +43,6 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       );
       if (foundIp != null) {
         DashcamService.ip = foundIp;
-        DashcamFile.setIp(foundIp);
         ok = true;
         appLog('Dashcam', 'Auto-discovered dashcam at $foundIp');
       }
@@ -60,21 +59,42 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       return;
     }
 
-    appLog('Dashcam', 'Connected');
+    appLog('Dashcam', 'Connected to ${DashcamService.ip}');
 
-    // Fetch device info + storage
+    // Fetch device info, storage, and media info in parallel
     DashcamDeviceInfo? info;
     DashcamStorageInfo? storage;
-    try { info    = await DashcamService.getDeviceInfo(); } catch (_) {}
-    try { storage = await DashcamService.getStorageInfo(); } catch (_) {}
+    DashcamMediaInfo? media;
+    try {
+      final results = await Future.wait([
+        DashcamService.getDeviceInfo().catchError((_) =>
+            const DashcamDeviceInfo()),
+        DashcamService.getStorageInfo().catchError((_) =>
+            const DashcamStorageInfo()),
+        DashcamService.getMediaInfo().catchError((_) =>
+            const DashcamMediaInfo()),
+      ]);
+      info = results[0] as DashcamDeviceInfo;
+      storage = results[1] as DashcamStorageInfo;
+      media = results[2] as DashcamMediaInfo;
+    } catch (_) {}
+
+    // Detect recording state from params
+    bool recording = false;
+    try {
+      final recVal = await DashcamService.getParamValue('rec');
+      recording = recVal == 1;
+    } catch (_) {}
 
     state = state.copyWith(
-      status:      DashcamConnectionStatus.connected,
-      deviceInfo:  info,
+      status: DashcamConnectionStatus.connected,
+      deviceInfo: info,
       storageInfo: storage,
+      mediaInfo: media,
+      isRecording: recording,
     );
 
-    // Start heartbeat
+    // Start heartbeat (polls getdeviceattr every 5s)
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(const Duration(seconds: 5), (_) async {
       final alive = await DashcamService.sendHeartbeat();
@@ -88,8 +108,20 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       }
     });
 
-    // Fetch file list
-    await refreshFiles();
+    // Fetch file list + settings
+    await Future.wait([
+      refreshFiles(),
+      refreshSettings(),
+    ]);
+
+    // Sync time + timezone
+    try {
+      final tz = DateTime.now().timeZoneOffset.inHours;
+      await Future.wait([
+        DashcamService.setDateTime(DateTime.now()),
+        DashcamService.setTimezone(tz),
+      ]);
+    } catch (_) {}
   }
 
   void disconnect() {
@@ -98,6 +130,9 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
     _heartbeat = null;
     thumbnailCache.clear();
     state = const DashcamState();
+
+    // Remove WiFi pairs from the clip list
+    _ref.read(videoPairListProvider.notifier).clearDashcamPairs();
   }
 
   // ── File operations ────────────────────────────────────────────────────
@@ -106,9 +141,12 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
     if (state.status != DashcamConnectionStatus.connected) return;
     try {
       appLog('Dashcam', 'Fetching file list');
-      final files = await DashcamService.listFiles();
+      final files = await DashcamService.listAllFiles();
       files.sort((a, b) {
-        // Newest first
+        // Newest first by createtime
+        if (a.createtime != 0 && b.createtime != 0) {
+          return b.createtime.compareTo(a.createtime);
+        }
         if (a.timestamp != null && b.timestamp != null) {
           return b.timestamp!.compareTo(a.timestamp!);
         }
@@ -116,6 +154,9 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       });
       appLog('Dashcam', 'Found ${files.length} files');
       state = state.copyWith(files: files);
+
+      // Push paired files into the main clip list
+      _ref.read(videoPairListProvider.notifier).loadFromDashcam(files);
     } catch (e) {
       debugPrint('DashcamNotifier refreshFiles error: $e');
     }
@@ -127,18 +168,6 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       final storage = await DashcamService.getStorageInfo();
       state = state.copyWith(storageInfo: storage);
     } catch (_) {}
-  }
-
-  Future<bool> deleteFile(DashcamFile file) async {
-    appLog('Dashcam', 'Deleting ${file.name}');
-    final ok = await DashcamService.deleteFile(file.path);
-    if (ok) {
-      state = state.copyWith(
-        files: state.files.where((f) => f.path != file.path).toList(),
-      );
-      await refreshStorage();
-    }
-    return ok;
   }
 
   Future<bool> downloadFile(DashcamFile file, String localDir) async {
@@ -155,11 +184,11 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       localPath: localPath,
       fileSize: file.size,
       onProgress: (p) {
-        state = state.copyWith(downloadProgress: p);
+        if (mounted) state = state.copyWith(downloadProgress: p);
       },
     );
 
-    state = state.copyWith(clearDownload: true, downloadProgress: 0);
+    if (mounted) state = state.copyWith(clearDownload: true, downloadProgress: 0);
     appLog('Dashcam', 'Download ${ok ? "complete" : "failed"}: ${file.name}');
     return ok;
   }
@@ -175,6 +204,7 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
   // ── Camera control ─────────────────────────────────────────────────────
 
   Future<void> startRecording() async {
+    await DashcamService.enterRecorder();
     final ok = await DashcamService.startRecording();
     if (ok) state = state.copyWith(isRecording: true);
   }
@@ -184,24 +214,63 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
     if (ok) state = state.copyWith(isRecording: false);
   }
 
-  Future<void> takePhoto() async {
-    await DashcamService.takePhoto();
+  Future<void> switchCamera(int camId) async {
+    await DashcamService.switchCamera(camId);
+    // Refresh device info to get updated curcamid
+    try {
+      final info = await DashcamService.getDeviceInfo();
+      state = state.copyWith(deviceInfo: info);
+    } catch (_) {}
   }
 
   // ── Settings ───────────────────────────────────────────────────────────
 
-  Future<bool> formatSD() async {
-    appLog('Dashcam', 'Formatting SD card');
-    final ok = await DashcamService.formatSDCard();
+  Future<void> refreshSettings() async {
+    if (state.status != DashcamConnectionStatus.connected) return;
+    try {
+      final results = await Future.wait([
+        DashcamService.getParamValues(),
+        DashcamService.getParamItems(),
+      ]);
+      state = state.copyWith(
+        params: results[0] as List<DashcamParam>,
+        paramSchemas: results[1] as List<DashcamParamSchema>,
+      );
+
+      // Update isRecording from params
+      final recValue = state.paramValue('rec');
+      if (recValue != null) {
+        state = state.copyWith(isRecording: recValue == 1);
+      }
+    } catch (e) {
+      debugPrint('DashcamNotifier refreshSettings error: $e');
+    }
+  }
+
+  Future<bool> setParam(String param, int value) async {
+    final ok = await DashcamService.setParam(param, value);
     if (ok) {
-      state = state.copyWith(files: []);
-      await refreshStorage();
+      // Update local state immediately
+      final updated = state.params.map((p) {
+        if (p.name == param) return DashcamParam(name: param, value: value);
+        return p;
+      }).toList();
+      state = state.copyWith(params: updated);
+
+      // Track recording state
+      if (param == 'rec') {
+        state = state.copyWith(isRecording: value == 1);
+      }
     }
     return ok;
   }
 
   Future<void> syncDateTime() async {
-    await DashcamService.setDateTime(DateTime.now());
+    final tz = DateTime.now().timeZoneOffset.inHours;
+    await Future.wait([
+      DashcamService.setDateTime(DateTime.now()),
+      DashcamService.setTimezone(tz),
+    ]);
   }
 
   @override
@@ -213,5 +282,5 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
 
 final dashcamProvider =
     StateNotifierProvider<DashcamNotifier, DashcamState>(
-  (ref) => DashcamNotifier(),
+  (ref) => DashcamNotifier(ref),
 );

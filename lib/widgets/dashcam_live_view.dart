@@ -20,7 +20,17 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
   bool _streaming = false;
   bool _connecting = false;
   String? _error;
-  late String _currentUrl = DashcamService.rtspFrontUrl;
+  late String _currentUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    // Use the RTSP URL from mediaInfo if available, otherwise default
+    final mediaInfo = ref.read(dashcamProvider).mediaInfo;
+    _currentUrl = mediaInfo?.rtsp.isNotEmpty == true
+        ? mediaInfo!.rtsp
+        : DashcamService.rtspUrl;
+  }
 
   @override
   void dispose() {
@@ -32,32 +42,52 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
     if (_connecting) return;
     setState(() { _connecting = true; _error = null; });
 
-    // Switch dashcam to video mode for live stream
+    // Stop recording first — most dashcams can't record and stream simultaneously
+    final notifier = ref.read(dashcamProvider.notifier);
     try {
-      await DashcamService.setMode(0);
+      await notifier.stopRecording();
       await Future.delayed(const Duration(milliseconds: 500));
+    } catch (_) {}
+
+    // Switch to front camera for the live view
+    try {
+      await DashcamService.switchCamera(0);
     } catch (_) {}
 
     _player = Player(
       configuration: const PlayerConfiguration(
         bufferSize: 0,
+        logLevel: MPVLogLevel.v,
       ),
     );
 
     _controller = VideoController(_player!);
 
+    // Force RTSP over TCP — dashcam getmediainfo says transport: "tcp"
     try {
+      final nativePlayer = _player!.platform as NativePlayer;
+      await nativePlayer.setProperty('rtsp-transport', 'tcp');
+      debugPrint('DashcamLiveView: set rtsp-transport=tcp');
+    } catch (e) {
+      debugPrint('DashcamLiveView: could not set rtsp-transport: $e');
+    }
+
+    try {
+      debugPrint('DashcamLiveView: opening $_currentUrl (rtsp-transport=tcp)');
       await _player!.open(Media(_currentUrl), play: true);
       // Wait a moment to see if it actually connects
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 3));
       if (mounted) {
         setState(() { _streaming = true; _connecting = false; });
       }
     } catch (e) {
+      debugPrint('DashcamLiveView: stream error: $e');
       if (mounted) {
         setState(() {
           _connecting = false;
-          _error = 'Failed to connect to RTSP stream.\nTry a different URL.';
+          _error = 'Failed to connect to RTSP stream.\n'
+              'URL: $_currentUrl\n'
+              'Try a different URL or check if dashcam supports live streaming.';
         });
       }
     }
@@ -74,6 +104,16 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
   Widget build(BuildContext context) {
     final dcState = ref.watch(dashcamProvider);
 
+    // Build URL list from mediaInfo + defaults
+    final urls = <String>[];
+    if (dcState.mediaInfo != null && dcState.mediaInfo!.rtsp.isNotEmpty) {
+      urls.add(dcState.mediaInfo!.rtsp);
+      urls.add('${dcState.mediaInfo!.rtsp}:${dcState.mediaInfo!.port}');
+    }
+    for (final u in DashcamService.rtspUrls) {
+      if (!urls.contains(u)) urls.add(u);
+    }
+
     return Column(children: [
       // Stream URL selector + controls
       Container(
@@ -87,15 +127,15 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
           // URL selector
           Expanded(
             child: DropdownButton<String>(
-              value: DashcamService.rtspUrls.contains(_currentUrl)
-                  ? _currentUrl : DashcamService.rtspUrls.first,
+              value: urls.contains(_currentUrl)
+                  ? _currentUrl : urls.first,
               dropdownColor: const Color(0xFF222222),
               style: const TextStyle(color: Colors.white60, fontSize: 11,
                   fontFamily: 'monospace'),
               underline: const SizedBox(),
               isExpanded: true,
               items: [
-                for (final url in DashcamService.rtspUrls)
+                for (final url in urls)
                   DropdownMenuItem(value: url,
                     child: Text(url, overflow: TextOverflow.ellipsis)),
               ],
@@ -179,9 +219,15 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
             },
           ),
           const SizedBox(width: 16),
-          _CtrlBtn(Icons.camera_alt_rounded, 'Photo', Colors.white60,
-            () => ref.read(dashcamProvider.notifier).takePhoto()),
-          const SizedBox(width: 16),
+          // Switch camera
+          if (dcState.deviceInfo != null && dcState.deviceInfo!.camnum > 1) ...[
+            _CtrlBtn(Icons.cameraswitch_rounded, 'Switch Camera', Colors.white60,
+              () {
+                final cur = dcState.deviceInfo!.curcamid;
+                ref.read(dashcamProvider.notifier).switchCamera(cur == 0 ? 1 : 0);
+              }),
+            const SizedBox(width: 16),
+          ],
           _CtrlBtn(Icons.refresh_rounded, 'Refresh Files', Colors.white60,
             () => ref.read(dashcamProvider.notifier).refreshFiles()),
         ]),

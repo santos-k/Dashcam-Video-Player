@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import '../models/dashcam_file.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
@@ -68,6 +69,25 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
     }
     state = List.of(_raw);
     return removed;
+  }
+
+  /// Load dashcam WiFi files and pair them into VideoPairs.
+  /// Merges with any existing local pairs.
+  void loadFromDashcam(List<DashcamFile> files) {
+    final wifiPairs = FilePairer.pairFromDashcam(files);
+    appLog('Dashcam', 'Paired ${wifiPairs.length} clips from WiFi dashcam');
+
+    // Remove any previous WiFi pairs, keep local ones
+    _raw.removeWhere((p) => p.isRemote);
+    _raw.addAll(wifiPairs);
+    _raw.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    state = List.of(_raw);
+  }
+
+  /// Remove all WiFi dashcam pairs (on disconnect).
+  void clearDashcamPairs() {
+    _raw.removeWhere((p) => p.isRemote);
+    state = List.of(_raw);
   }
 
   void clear() {
@@ -151,9 +171,9 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     try {
       await Future.wait([
         if (pair.hasFront)
-          _frontPlayer.open(Media(pair.frontFile!.path), play: false),
+          _frontPlayer.open(Media(pair.frontPath!), play: false),
         if (pair.hasBack)
-          _backPlayer.open(Media(pair.backFile!.path),   play: false),
+          _backPlayer.open(Media(pair.backPath!),   play: false),
       ]);
     } catch (e) {
       debugPrint('media_kit open error: $e');

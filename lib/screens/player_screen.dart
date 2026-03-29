@@ -13,6 +13,7 @@ import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
+import '../services/dashcam_service.dart';
 import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
@@ -601,22 +602,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     for (final idx in selected) {
       final pair = pairs[idx];
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
-          await file.copy(dest);
-          copied++;
-          ref.read(savingClipsProvider.notifier).state =
-              '$copied/$totalFiles saved';
-        } catch (e) {
-          debugPrint('Copy failed: $e');
-          failed++;
+
+      if (pair.isRemote) {
+        // WiFi dashcam files — download via HTTP
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final fileName = Uri.parse(url).pathSegments.last;
+          final dest = '$outDir${Platform.pathSeparator}$fileName';
+          try {
+            final ok = await DashcamService.downloadFile(
+              remotePath: Uri.parse(url).path,
+              localPath: dest,
+              fileSize: 0,
+              onProgress: (_) {},
+            );
+            if (ok) { copied++; } else { failed++; }
+            ref.read(savingClipsProvider.notifier).state =
+                '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Download failed: $e');
+            failed++;
+          }
+        }
+      } else {
+        // Local files — copy
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+            await file.copy(dest);
+            copied++;
+            ref.read(savingClipsProvider.notifier).state =
+                '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Copy failed: $e');
+            failed++;
+          }
         }
       }
     }
 
-    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    appLog('Save', 'Saved $copied file(s), $failed failed → $outDir');
     ref.read(savingClipsProvider.notifier).state = null;
     _focusNode.requestFocus();
   }
@@ -668,10 +694,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
-    // Delete files from disk
+    // Delete files from disk (skip remote WiFi files)
     int deleted = 0, failed = 0;
     for (final idx in toDelete) {
       final pair = pairs[idx];
+      if (pair.isRemote) {
+        // Remote files — just remove from list, no disk delete
+        deleted++;
+        continue;
+      }
       for (final file in [pair.frontFile, pair.backFile]) {
         if (file == null) continue;
         try {
@@ -750,21 +781,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     for (final idx in selected) {
       final pair = pairs[idx];
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
-          await file.copy(dest);
-          copied++;
-          ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
-        } catch (e) {
-          debugPrint('Copy failed: $e');
-          failed++;
+
+      if (pair.isRemote) {
+        // WiFi dashcam files — download via HTTP
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final fileName = Uri.parse(url).pathSegments.last;
+          final dest = '$outDir${Platform.pathSeparator}$fileName';
+          try {
+            final ok = await DashcamService.downloadFile(
+              remotePath: Uri.parse(url).path,
+              localPath: dest,
+              fileSize: 0,
+              onProgress: (_) {},
+            );
+            if (ok) { copied++; } else { failed++; }
+            ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Download failed: $e');
+            failed++;
+          }
+        }
+      } else {
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+            await file.copy(dest);
+            copied++;
+            ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Copy failed: $e');
+            failed++;
+          }
         }
       }
     }
 
-    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    appLog('Save', 'Saved $copied file(s), $failed failed → $outDir');
     ref.read(savingClipsProvider.notifier).state = null;
 
     // Clear selection
@@ -1459,6 +1513,10 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                       const Text('locked',
                         style: TextStyle(color: Colors.redAccent, fontSize: 10)),
                     ],
+                    if (pair.isRemote) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
+                    ],
                   ]),
                   dense: true,
                 );
@@ -1633,6 +1691,10 @@ class _DeleteClipDialogState extends State<_DeleteClipDialog> {
                       const SizedBox(width: 4),
                       const Text('locked',
                         style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                    ],
+                    if (pair.isRemote) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
                     ],
                   ]),
                   dense: true,
