@@ -198,9 +198,9 @@ class _FileTileState extends ConsumerState<_FileTile> {
           // Download
           _ActionIcon(Icons.download_rounded, 'Download',
               Colors.white54, () => _downloadFile(file)),
-          // Delete (not available on all dashcam firmwares)
-          // _ActionIcon(Icons.delete_outline_rounded, 'Delete',
-          //     Colors.redAccent, () => _deleteFile(file)),
+          // Delete from dashcam SD card
+          _ActionIcon(Icons.delete_outline_rounded, 'Delete',
+              Colors.redAccent, () => _deleteFile(file)),
         ] else
           const SizedBox(width: 24, height: 24,
             child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF4FC3F7))),
@@ -250,6 +250,34 @@ class _FileTileState extends ConsumerState<_FileTile> {
     }
   }
 
+  Future<void> _deleteFile(DashcamFile file) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Delete File',
+            style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text('Delete "${file.name}" (${file.displaySize}) from dashcam?',
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final success = await ref.read(dashcamProvider.notifier).deleteFile(widget.file);
+    if (mounted) {
+      showAppNotification(
+        context,
+        success ? 'Deleted ${file.name}' : 'Failed to delete ${file.name}',
+        icon: success ? Icons.delete_rounded : null,
+        type: success ? NotificationType.success : NotificationType.error,
+      );
+    }
+  }
 }
 
 class _ActionIcon extends StatelessWidget {

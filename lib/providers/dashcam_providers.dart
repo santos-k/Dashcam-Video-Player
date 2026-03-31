@@ -61,7 +61,23 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
 
     appLog('Dashcam', 'Connected to ${DashcamService.ip}');
 
-    // Fetch device info, storage, and media info in parallel
+    // ── Connection flow per Swagger docs ──
+    // Step 1: Sync clock + timezone
+    try {
+      final tz = DateTime.now().timeZoneOffset.inHours;
+      await Future.wait([
+        DashcamService.setDateTime(DateTime.now()),
+        DashcamService.setTimezone(tz),
+      ]);
+    } catch (_) {}
+
+    // Step 2: Fetch config schema + current values
+    await refreshSettings();
+
+    // Step 3: Enter active recorder mode
+    await DashcamService.enterRecorder();
+
+    // Step 4: Fetch device info, storage, media info in parallel
     DashcamDeviceInfo? info;
     DashcamStorageInfo? storage;
     DashcamMediaInfo? media;
@@ -79,49 +95,37 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
       media = results[2] as DashcamMediaInfo;
     } catch (_) {}
 
-    // Detect recording state from params
-    bool recording = false;
-    try {
-      final recVal = await DashcamService.getParamValue('rec');
-      recording = recVal == 1;
-    } catch (_) {}
-
     state = state.copyWith(
       status: DashcamConnectionStatus.connected,
       deviceInfo: info,
       storageInfo: storage,
       mediaInfo: media,
-      isRecording: recording,
+      isRecording: state.paramValue('rec') == 1,
     );
 
-    // Start heartbeat (polls getdeviceattr every 5s)
+    // Step 5: Fetch file list (loop → emr → event → park)
+    await refreshFiles();
+
+    // Step 6: Start heartbeat using getrecduration (per Swagger: highest
+    // poll-rate endpoint, serves as both recording timer and keep-alive)
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(const Duration(seconds: 5), (_) async {
-      final alive = await DashcamService.sendHeartbeat();
-      if (!alive && state.status == DashcamConnectionStatus.connected) {
-        appLog('Dashcam', 'Heartbeat lost');
-        state = state.copyWith(
-          status: DashcamConnectionStatus.error,
-          errorMessage: 'Lost connection to dashcam.',
-        );
-        _heartbeat?.cancel();
+      try {
+        final duration = await DashcamService.getRecDuration();
+        if (mounted) {
+          state = state.copyWith(recDuration: duration);
+        }
+      } catch (_) {
+        if (state.status == DashcamConnectionStatus.connected) {
+          appLog('Dashcam', 'Heartbeat lost');
+          state = state.copyWith(
+            status: DashcamConnectionStatus.error,
+            errorMessage: 'Lost connection to dashcam.',
+          );
+          _heartbeat?.cancel();
+        }
       }
     });
-
-    // Fetch file list + settings
-    await Future.wait([
-      refreshFiles(),
-      refreshSettings(),
-    ]);
-
-    // Sync time + timezone
-    try {
-      final tz = DateTime.now().timeZoneOffset.inHours;
-      await Future.wait([
-        DashcamService.setDateTime(DateTime.now()),
-        DashcamService.setTimezone(tz),
-      ]);
-    } catch (_) {}
   }
 
   void disconnect() {
@@ -190,6 +194,21 @@ class DashcamNotifier extends StateNotifier<DashcamState> {
 
     if (mounted) state = state.copyWith(clearDownload: true, downloadProgress: 0);
     appLog('Dashcam', 'Download ${ok ? "complete" : "failed"}: ${file.name}');
+    return ok;
+  }
+
+  /// Delete a file from the dashcam SD card.
+  Future<bool> deleteFile(DashcamFile file) async {
+    appLog('Dashcam', 'Deleting ${file.name}');
+    final ok = await DashcamService.deleteFile(file.path);
+    if (ok) {
+      state = state.copyWith(
+        files: state.files.where((f) => f.path != file.path).toList(),
+      );
+      // Re-pair and push to clip list
+      _ref.read(videoPairListProvider.notifier).loadFromDashcam(state.files);
+      await refreshStorage();
+    }
     return ok;
   }
 

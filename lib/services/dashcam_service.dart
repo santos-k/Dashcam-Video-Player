@@ -155,10 +155,11 @@ class DashcamService {
     return null;
   }
 
-  /// Heartbeat — uses getdeviceattr (lightweight, ~6ms).
+  /// Heartbeat — uses getrecduration (per Swagger: highest poll-rate
+  /// endpoint, serves as both recording timer and connection keep-alive).
   static Future<bool> sendHeartbeat() async {
     try {
-      final json = await _getJson('getdeviceattr');
+      final json = await _getJson('getrecduration');
       return _isOk(json);
     } catch (_) {
       return false;

@@ -499,6 +499,11 @@ class _SettingsTab extends ConsumerWidget {
             ]),
           ),
         ],
+        _SettingRow(
+          icon: Icons.camera_alt_rounded,
+          label: 'Take Snapshot',
+          trailing: _ActionBtn('Capture', () => DashcamService.takeSnapshot()),
+        ),
 
         const SizedBox(height: 12),
         const _SectionTitle('Dashcam Settings'),
