@@ -309,6 +309,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _toggleFullscreen();
       case ShortcutAction.shortcutSettings:
         _showShortcutSettings();
+      case ShortcutAction.wifiDashcam:
+        setState(() => _dashcamOpen = !_dashcamOpen);
+        appLog('Shortcut', 'N – toggle Wi-Fi dashcam');
       case ShortcutAction.clipList:
       case ShortcutAction.mapSidebar:
       case ShortcutAction.about:
@@ -1327,6 +1330,7 @@ class _EmptyState extends ConsumerWidget {
                       _kb(sc.label(ShortcutAction.selectMode), 'Select mode'),
                       _kb(sc.label(ShortcutAction.selectAll), 'Select all'),
                       _kb(sc.label(ShortcutAction.mapSidebar), 'Map sidebar'),
+                      _kb(sc.label(ShortcutAction.wifiDashcam), 'Wi-Fi dashcam'),
                       _kb(sc.label(ShortcutAction.about), 'About'),
                     ],
                   )),

@@ -31,6 +31,7 @@ enum ShortcutAction {
   selectMode,
   selectAll,
   mapSidebar,
+  wifiDashcam,
   about,
   // File
   openFolder,
@@ -150,6 +151,7 @@ const actionDisplayNames = <ShortcutAction, String>{
   ShortcutAction.selectMode:       'Select mode',
   ShortcutAction.selectAll:        'Select all',
   ShortcutAction.mapSidebar:       'Map sidebar',
+  ShortcutAction.wifiDashcam:      'Wi-Fi dashcam',
   ShortcutAction.about:            'About',
   ShortcutAction.openFolder:       'Open folder',
   ShortcutAction.saveClips:        'Save clips',
@@ -192,6 +194,7 @@ const actionCategories = <String, List<ShortcutAction>>{
     ShortcutAction.selectMode,
     ShortcutAction.selectAll,
     ShortcutAction.mapSidebar,
+    ShortcutAction.wifiDashcam,
     ShortcutAction.about,
   ],
   'File': [
@@ -232,6 +235,7 @@ const _defaults = <ShortcutAction, KeyBinding>{
   ShortcutAction.selectMode:       KeyBinding('keyX'),
   ShortcutAction.selectAll:        KeyBinding('keyA'),
   ShortcutAction.mapSidebar:       KeyBinding('keyM'),
+  ShortcutAction.wifiDashcam:      KeyBinding('keyN'),
   ShortcutAction.about:            KeyBinding('keyI'),
   ShortcutAction.openFolder:       KeyBinding('keyO'),
   ShortcutAction.saveClips:        KeyBinding('keyS'),
