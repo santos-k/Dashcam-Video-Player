@@ -17,7 +17,7 @@ import '../services/shortcut_service.dart';
 // 1. Sort order
 // ─────────────────────────────────────────
 
-enum SortOrder { newestFirst, oldestFirst }
+enum SortOrder { newestFirst, oldestFirst, nameAZ, nameZA, longestFirst, shortestFirst }
 
 final sortOrderProvider = StateProvider<SortOrder>((ref) => SortOrder.oldestFirst);
 
@@ -51,11 +51,39 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
     state = pairs;
   }
 
+  /// Duration cache reference for duration-based sorting.
+  Map<String, Duration> _durationCache = {};
+
+  void setDurationCache(Map<String, Duration> cache) {
+    _durationCache = cache;
+  }
+
   void applySort(SortOrder order) {
     if (_raw.isEmpty) return;
-    state = order == SortOrder.newestFirst
-        ? _raw.reversed.toList()
-        : List.of(_raw);
+    final sorted = List.of(_raw);
+    switch (order) {
+      case SortOrder.oldestFirst:
+        sorted.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      case SortOrder.newestFirst:
+        sorted.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      case SortOrder.nameAZ:
+        sorted.sort((a, b) => a.id.compareTo(b.id));
+      case SortOrder.nameZA:
+        sorted.sort((a, b) => b.id.compareTo(a.id));
+      case SortOrder.longestFirst:
+        sorted.sort((a, b) {
+          final da = _durationCache[a.id]?.inSeconds ?? 0;
+          final db = _durationCache[b.id]?.inSeconds ?? 0;
+          return db.compareTo(da);
+        });
+      case SortOrder.shortestFirst:
+        sorted.sort((a, b) {
+          final da = _durationCache[a.id]?.inSeconds ?? 0;
+          final db = _durationCache[b.id]?.inSeconds ?? 0;
+          return da.compareTo(db);
+        });
+    }
+    state = sorted;
   }
 
   /// Remove pairs at the given indices (referencing current [state] order)

@@ -136,33 +136,34 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
               ),
               const SizedBox(height: 10),
 
-              // Sort toggle
-              GestureDetector(
-                onTap: () {
-                  final next = sortOrder == SortOrder.oldestFirst
-                      ? SortOrder.newestFirst
-                      : SortOrder.oldestFirst;
-                  ref.read(sortOrderProvider.notifier).state = next;
-                  ref.read(videoPairListProvider.notifier).applySort(next);
-                  ref.read(currentIndexProvider.notifier).state = 0;
-                },
-                child: Row(children: [
-                  Icon(
-                    sortOrder == SortOrder.oldestFirst
-                        ? Icons.arrow_upward_rounded
-                        : Icons.arrow_downward_rounded,
-                    color: Colors.white38, size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    sortOrder == SortOrder.oldestFirst
-                        ? 'Oldest first  (tap to reverse)'
-                        : 'Newest first  (tap to reverse)',
-                    style: const TextStyle(
-                        color: Colors.white38, fontSize: 11),
-                  ),
-                ]),
-              ),
+              // Sort dropdown
+              Row(children: [
+                const Icon(Icons.sort_rounded, color: Colors.white38, size: 14),
+                const SizedBox(width: 4),
+                DropdownButton<SortOrder>(
+                  value: sortOrder,
+                  dropdownColor: const Color(0xFF222222),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  underline: const SizedBox(),
+                  isDense: true,
+                  items: const [
+                    DropdownMenuItem(value: SortOrder.oldestFirst, child: Text('Date (oldest)')),
+                    DropdownMenuItem(value: SortOrder.newestFirst, child: Text('Date (newest)')),
+                    DropdownMenuItem(value: SortOrder.nameAZ, child: Text('Name (A-Z)')),
+                    DropdownMenuItem(value: SortOrder.nameZA, child: Text('Name (Z-A)')),
+                    DropdownMenuItem(value: SortOrder.longestFirst, child: Text('Duration (longest)')),
+                    DropdownMenuItem(value: SortOrder.shortestFirst, child: Text('Duration (shortest)')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    ref.read(sortOrderProvider.notifier).state = v;
+                    final notifier = ref.read(videoPairListProvider.notifier);
+                    notifier.setDurationCache(ref.read(clipDurationCacheProvider));
+                    notifier.applySort(v);
+                    ref.read(currentIndexProvider.notifier).state = 0;
+                  },
+                ),
+              ]),
             ],
           ),
         ),

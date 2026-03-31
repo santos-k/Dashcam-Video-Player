@@ -223,7 +223,13 @@ class ExportService {
     }
   }
 
-  /// Use ffprobe to get video duration.
+  /// Use ffprobe to get video duration. Public for clip duration probing.
+  static Future<Duration?> probeDuration(String videoPath) async {
+    final ffmpeg = await _findFFmpeg();
+    if (ffmpeg == null) return null;
+    return _probeDuration(ffmpeg, videoPath);
+  }
+
   static Future<Duration> _probeDuration(String ffmpeg, String videoPath) async {
     final exeDir     = File(ffmpeg).parent.path;
     final ffprobeName = Platform.isWindows ? 'ffprobe.exe' : 'ffprobe';

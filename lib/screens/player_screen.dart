@@ -316,10 +316,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _confirmCloseFolder();
       case ShortcutAction.toggleSort:
         final cur = ref.read(sortOrderProvider);
-        final next = cur == SortOrder.oldestFirst
-            ? SortOrder.newestFirst : SortOrder.oldestFirst;
+        final values = SortOrder.values;
+        final next = values[(cur.index + 1) % values.length];
         ref.read(sortOrderProvider.notifier).state = next;
-        ref.read(videoPairListProvider.notifier).applySort(next);
+        final listNotifier = ref.read(videoPairListProvider.notifier);
+        listNotifier.setDurationCache(ref.read(clipDurationCacheProvider));
+        listNotifier.applySort(next);
         ref.read(currentIndexProvider.notifier).state = 0;
       case ShortcutAction.quit:
         _confirmQuit();
@@ -448,6 +450,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       if (vp != null) thumbPaths.add(vp);
     }
     ThumbnailService.pregenerate(thumbPaths);
+
+    // Probe durations for all clips in background
+    _probeDurations(pairs);
+  }
+
+  Future<void> _probeDurations(List<VideoPair> pairs) async {
+    final cache = Map.of(ref.read(clipDurationCacheProvider));
+    for (final pair in pairs) {
+      if (cache.containsKey(pair.id)) continue;
+      final path = pair.frontPath ?? pair.backPath;
+      if (path == null) continue;
+      // Skip remote URLs — ffprobe can't access HTTP
+      if (path.startsWith('http')) continue;
+      try {
+        final dur = await ExportService.probeDuration(path);
+        if (dur != null && dur > Duration.zero && mounted) {
+          cache[pair.id] = dur;
+          ref.read(clipDurationCacheProvider.notifier).state = Map.of(cache);
+        }
+      } catch (_) {}
+    }
   }
 
   void _toggleMapSidebar() {
@@ -979,6 +1002,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     onMap:          _toggleMapSidebar,
                     onZoomIn:       () => _videoViewKey.currentState?.zoomIn(),
                     onZoomOut:      () => _videoViewKey.currentState?.zoomOut(),
+                    onZoomReset:    () => _videoViewKey.currentState?.resetZoom(),
                     focusRequester: _focusNode.requestFocus,
                   )
                 : const SizedBox.shrink(),
