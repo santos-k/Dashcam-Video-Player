@@ -426,9 +426,12 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
   }
 
   Widget _statusBadge(VideoPair pair) {
-    if (pair.isPaired)  return _pill('F+B',    const Color(0xFF4FC3F7));
-    if (pair.hasFront)  return _pill('F only', Colors.orange);
-    return                     _pill('B only', Colors.purple);
+    if (pair.isPaired) return _pill('F+B', const Color(0xFF4FC3F7));
+    if (pair.hasFront && !pair.hasBack && pair.source == 'local') {
+      return _pill('Video', Colors.teal);
+    }
+    if (pair.hasFront) return _pill('F only', Colors.orange);
+    return _pill('B only', Colors.purple);
   }
 
   Widget _pill(String text, Color color) => Container(

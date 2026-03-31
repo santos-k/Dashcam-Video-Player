@@ -1469,16 +1469,21 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                 final pair = widget.pairs[i];
                 final checked = _selected.contains(i);
                 final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final isSingleVideo = pair.hasFront && !pair.hasBack && !pair.isRemote && pair.source == 'local';
                 final badge = pair.isPaired
                     ? 'F+B'
-                    : pair.hasFront
-                        ? 'F only'
-                        : 'B only';
+                    : isSingleVideo
+                        ? 'Video'
+                        : pair.hasFront
+                            ? 'F only'
+                            : 'B only';
                 final badgeColor = pair.isPaired
                     ? const Color(0xFF4FC3F7)
-                    : pair.hasFront
-                        ? Colors.orange
-                        : Colors.purple;
+                    : isSingleVideo
+                        ? Colors.teal
+                        : pair.hasFront
+                            ? Colors.orange
+                            : Colors.purple;
 
                 return CheckboxListTile(
                   value: checked,
@@ -1648,16 +1653,21 @@ class _DeleteClipDialogState extends State<_DeleteClipDialog> {
                 final pair = widget.pairs[i];
                 final checked = _selected.contains(i);
                 final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final isSingleVideo = pair.hasFront && !pair.hasBack && !pair.isRemote && pair.source == 'local';
                 final badge = pair.isPaired
                     ? 'F+B'
-                    : pair.hasFront
-                        ? 'F only'
-                        : 'B only';
+                    : isSingleVideo
+                        ? 'Video'
+                        : pair.hasFront
+                            ? 'F only'
+                            : 'B only';
                 final badgeColor = pair.isPaired
                     ? const Color(0xFF4FC3F7)
-                    : pair.hasFront
-                        ? Colors.orange
-                        : Colors.purple;
+                    : isSingleVideo
+                        ? Colors.teal
+                        : pair.hasFront
+                            ? Colors.orange
+                            : Colors.purple;
 
                 return CheckboxListTile(
                   value: checked,
