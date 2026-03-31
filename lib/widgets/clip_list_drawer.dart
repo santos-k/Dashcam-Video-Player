@@ -136,23 +136,42 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
               ),
               const SizedBox(height: 10),
 
-              // Sort dropdown
+              // Group + Sort dropdowns
               Row(children: [
-                const Icon(Icons.sort_rounded, color: Colors.white38, size: 14),
-                const SizedBox(width: 4),
-                DropdownButton<SortOrder>(
-                  value: sortOrder,
+                const Icon(Icons.workspaces_rounded, color: Colors.white38, size: 13),
+                const SizedBox(width: 2),
+                DropdownButton<GroupBy>(
+                  value: ref.watch(groupByProvider),
                   dropdownColor: const Color(0xFF222222),
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  style: const TextStyle(color: Colors.white54, fontSize: 10),
                   underline: const SizedBox(),
                   isDense: true,
                   items: const [
-                    DropdownMenuItem(value: SortOrder.oldestFirst, child: Text('Date (oldest)')),
-                    DropdownMenuItem(value: SortOrder.newestFirst, child: Text('Date (newest)')),
-                    DropdownMenuItem(value: SortOrder.nameAZ, child: Text('Name (A-Z)')),
-                    DropdownMenuItem(value: SortOrder.nameZA, child: Text('Name (Z-A)')),
-                    DropdownMenuItem(value: SortOrder.longestFirst, child: Text('Duration (longest)')),
-                    DropdownMenuItem(value: SortOrder.shortestFirst, child: Text('Duration (shortest)')),
+                    DropdownMenuItem(value: GroupBy.none, child: Text('No group')),
+                    DropdownMenuItem(value: GroupBy.date, child: Text('By date')),
+                    DropdownMenuItem(value: GroupBy.type, child: Text('By type')),
+                    DropdownMenuItem(value: GroupBy.source, child: Text('By source')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) ref.read(groupByProvider.notifier).state = v;
+                  },
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.sort_rounded, color: Colors.white38, size: 13),
+                const SizedBox(width: 2),
+                DropdownButton<SortOrder>(
+                  value: sortOrder,
+                  dropdownColor: const Color(0xFF222222),
+                  style: const TextStyle(color: Colors.white54, fontSize: 10),
+                  underline: const SizedBox(),
+                  isDense: true,
+                  items: const [
+                    DropdownMenuItem(value: SortOrder.oldestFirst, child: Text('Date ↑')),
+                    DropdownMenuItem(value: SortOrder.newestFirst, child: Text('Date ↓')),
+                    DropdownMenuItem(value: SortOrder.nameAZ, child: Text('Name A-Z')),
+                    DropdownMenuItem(value: SortOrder.nameZA, child: Text('Name Z-A')),
+                    DropdownMenuItem(value: SortOrder.longestFirst, child: Text('Duration ↓')),
+                    DropdownMenuItem(value: SortOrder.shortestFirst, child: Text('Duration ↑')),
                   ],
                   onChanged: (v) {
                     if (v == null) return;
@@ -229,29 +248,154 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                       },
                       onLongPress: (i) => _enterSelectMode(i),
                     )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      itemCount: pairs.length,
-                      itemBuilder: (ctx, i) => _ClipTile(
-                        pair:       pairs[i],
-                        index:      i,
-                        isCurrent:  i == current,
-                        selectMode: selectMode,
-                        isSelected: selected.contains(i),
-                        duration:   ref.watch(clipDurationCacheProvider)[pairs[i].id],
-                        onTap: () {
-                          if (selectMode) {
-                            _toggleSelection(selected, i);
-                          } else {
-                            Navigator.of(ctx).pop();
-                            widget.onSelect(i);
-                          }
-                        },
-                        onLongPress: () => _enterSelectMode(i),
-                      ),
+                  : _GroupedListView(
+                      scrollController: _scrollController,
+                      pairs: pairs,
+                      current: current,
+                      selectMode: selectMode,
+                      selected: selected,
+                      groupBy: ref.watch(groupByProvider),
+                      durations: ref.watch(clipDurationCacheProvider),
+                      onTap: (i) {
+                        if (selectMode) {
+                          _toggleSelection(selected, i);
+                        } else {
+                          Navigator.of(context).pop();
+                          widget.onSelect(i);
+                        }
+                      },
+                      onLongPress: (i) => _enterSelectMode(i),
+                      onSelectGroup: (indices) {
+                        final updated = Set.of(selected)..addAll(indices);
+                        ref.read(selectedClipIndicesProvider.notifier).state = updated;
+                        if (!selectMode) {
+                          ref.read(clipSelectionModeProvider.notifier).state = true;
+                        }
+                      },
                     ),
         ),
       ]),
+    );
+  }
+}
+
+// ─── Grouped list view ──────────────────────────────────────────────────────
+
+class _GroupedListView extends StatelessWidget {
+  final ScrollController scrollController;
+  final List<VideoPair> pairs;
+  final int current;
+  final bool selectMode;
+  final Set<int> selected;
+  final GroupBy groupBy;
+  final Map<String, Duration> durations;
+  final void Function(int) onTap;
+  final void Function(int) onLongPress;
+  final void Function(Set<int>) onSelectGroup;
+
+  const _GroupedListView({
+    required this.scrollController,
+    required this.pairs,
+    required this.current,
+    required this.selectMode,
+    required this.selected,
+    required this.groupBy,
+    required this.durations,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onSelectGroup,
+  });
+
+  String _groupKey(VideoPair p, int index) {
+    switch (groupBy) {
+      case GroupBy.none:
+        return '';
+      case GroupBy.date:
+        return DateFormat('yyyy-MM-dd').format(p.timestamp);
+      case GroupBy.type:
+        if (p.isPaired) return 'Paired (F+B)';
+        if (p.hasFront && !p.hasBack && p.source == 'local') return 'Video';
+        if (p.hasFront) return 'Front only';
+        return 'Back only';
+      case GroupBy.source:
+        if (p.isRemote) return 'WiFi Dashcam';
+        return 'Local';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (groupBy == GroupBy.none) {
+      // No grouping — flat list
+      return ListView.builder(
+        controller: scrollController,
+        itemCount: pairs.length,
+        itemBuilder: (ctx, i) => _ClipTile(
+          pair: pairs[i], index: i,
+          isCurrent: i == current,
+          selectMode: selectMode,
+          isSelected: selected.contains(i),
+          duration: durations[pairs[i].id],
+          onTap: () => onTap(i),
+          onLongPress: () => onLongPress(i),
+        ),
+      );
+    }
+
+    // Build grouped structure
+    final groups = <String, List<int>>{}; // group key -> list of pair indices
+    for (int i = 0; i < pairs.length; i++) {
+      final key = _groupKey(pairs[i], i);
+      groups.putIfAbsent(key, () => []).add(i);
+    }
+
+    final groupKeys = groups.keys.toList();
+
+    return ListView.builder(
+      controller: scrollController,
+      itemCount: groupKeys.length,
+      itemBuilder: (ctx, gi) {
+        final key = groupKeys[gi];
+        final indices = groups[key]!;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Group header
+            GestureDetector(
+              onTap: () => onSelectGroup(indices.toSet()),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                color: const Color(0xFF1A1A1A),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(key,
+                      style: const TextStyle(color: Color(0xFF4FC3F7),
+                          fontSize: 11, fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5)),
+                  ),
+                  Text('${indices.length}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.select_all_rounded,
+                      color: Colors.white24, size: 12),
+                ]),
+              ),
+            ),
+            // Group items
+            for (final i in indices)
+              _ClipTile(
+                pair: pairs[i], index: i,
+                isCurrent: i == current,
+                selectMode: selectMode,
+                isSelected: selected.contains(i),
+                duration: durations[pairs[i].id],
+                onTap: () => onTap(i),
+                onLongPress: () => onLongPress(i),
+              ),
+          ],
+        );
+      },
     );
   }
 }

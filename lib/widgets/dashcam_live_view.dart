@@ -34,7 +34,7 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
     super.initState();
     final mediaInfo = ref.read(dashcamProvider).mediaInfo;
     _currentUrl = mediaInfo?.rtsp.isNotEmpty == true
-        ? mediaInfo!.rtsp
+        ? '${mediaInfo!.rtsp}:${mediaInfo.port}'
         : DashcamService.rtspUrl;
   }
 
@@ -131,15 +131,10 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
   Widget build(BuildContext context) {
     final dcState = ref.watch(dashcamProvider);
 
-    // Build URL list
-    final urls = <String>[];
-    if (dcState.mediaInfo != null && dcState.mediaInfo!.rtsp.isNotEmpty) {
-      urls.add(dcState.mediaInfo!.rtsp);
-      urls.add('${dcState.mediaInfo!.rtsp}:${dcState.mediaInfo!.port}');
-    }
-    for (final u in DashcamService.rtspUrls) {
-      if (!urls.contains(u)) urls.add(u);
-    }
+    // Single RTSP URL from API
+    final streamUrl = dcState.mediaInfo?.rtsp.isNotEmpty == true
+        ? '${dcState.mediaInfo!.rtsp}:${dcState.mediaInfo!.port}'
+        : DashcamService.rtspUrl;
 
     return Column(children: [
       // ── Top bar: URL selector + layout toggle + controls ──
@@ -173,26 +168,12 @@ class _DashcamLiveViewState extends ConsumerState<DashcamLiveView> {
             ),
             const SizedBox(width: 8),
           ],
-          // URL selector
+          // Stream URL display
           Expanded(
-            child: DropdownButton<String>(
-              value: urls.contains(_currentUrl) ? _currentUrl : urls.first,
-              dropdownColor: const Color(0xFF222222),
-              style: const TextStyle(color: Colors.white60, fontSize: 11,
+            child: Text(streamUrl,
+              style: const TextStyle(color: Colors.white38, fontSize: 11,
                   fontFamily: 'monospace'),
-              underline: const SizedBox(),
-              isExpanded: true,
-              items: [
-                for (final url in urls)
-                  DropdownMenuItem(value: url,
-                    child: Text(url, overflow: TextOverflow.ellipsis)),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => _currentUrl = v);
-                if (_streaming) { _stopStream(); _startStream(); }
-              },
-            ),
+              overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
           if (_streaming)

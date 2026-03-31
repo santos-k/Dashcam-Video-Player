@@ -18,8 +18,10 @@ import '../services/shortcut_service.dart';
 // ─────────────────────────────────────────
 
 enum SortOrder { newestFirst, oldestFirst, nameAZ, nameZA, longestFirst, shortestFirst }
+enum GroupBy { none, date, type, source }
 
 final sortOrderProvider = StateProvider<SortOrder>((ref) => SortOrder.oldestFirst);
+final groupByProvider = StateProvider<GroupBy>((ref) => GroupBy.none);
 
 // ─────────────────────────────────────────
 // 1b. Clip view mode & selection

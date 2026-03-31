@@ -62,6 +62,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         cache[id] = dur;
         ref.read(clipDurationCacheProvider.notifier).state = cache;
       };
+      // Auto-probe durations when clip list changes (e.g. dashcam connects)
+      ref.listenManual(videoPairListProvider, (prev, next) {
+        if (next.length > (prev?.length ?? 0)) {
+          _probeDurations(next);
+        }
+      });
     });
   }
 
@@ -374,6 +380,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final pairs = ref.read(videoPairListProvider);
     if (index < 0 || index >= pairs.length) return;
     appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
+    // Close dashcam overlay and show controls when navigating clips
+    if (_dashcamOpen) setState(() => _dashcamOpen = false);
+    _resetHideTimer();
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     final speed = ref.read(playbackSpeedProvider);
@@ -461,8 +470,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       if (cache.containsKey(pair.id)) continue;
       final path = pair.frontPath ?? pair.backPath;
       if (path == null) continue;
-      // Skip remote URLs — ffprobe can't access HTTP
-      if (path.startsWith('http')) continue;
       try {
         final dur = await ExportService.probeDuration(path);
         if (dur != null && dur > Duration.zero && mounted) {

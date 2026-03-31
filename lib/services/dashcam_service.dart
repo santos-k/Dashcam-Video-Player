@@ -436,17 +436,6 @@ class DashcamService {
 
   // ── RTSP stream URLs ──────────────────────────────────────────────────
 
-  /// Primary RTSP URL (port 5000 from getmediainfo, TCP transport).
+  /// RTSP URL from getmediainfo (TCP transport, port 5000).
   static String get rtspUrl => 'rtsp://$ip:5000';
-
-  /// All possible RTSP stream URLs to try.
-  static List<String> get rtspUrls => [
-        'rtsp://$ip:5000',
-        'rtsp://$ip:5000/live',
-        'rtsp://$ip:5000/0',
-        'rtsp://$ip:5000/1',
-        'rtsp://$ip',
-        'rtsp://$ip:554',
-        'http://$ip:5000',
-      ];
 }
