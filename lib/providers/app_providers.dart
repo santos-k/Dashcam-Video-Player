@@ -154,6 +154,9 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   /// Called by the UI when a clip ends — advances to next pair.
   VoidCallback? onClipEnd;
 
+  /// Called when a clip duration is resolved after loading.
+  void Function(String clipId, Duration duration)? onDurationResolved;
+
   Future<void> loadPair(VideoPair pair, int syncOffsetMs,
       {bool autoPlay = false}) async {
     appLog('Playback', 'loadPair: ${pair.id} (front=${pair.hasFront}, back=${pair.hasBack}, offset=$syncOffsetMs, autoPlay=$autoPlay)');
@@ -201,6 +204,15 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         if (pair.hasBack)  _backPlayer.play(),
       ]);
     }
+
+    // Cache the clip duration
+    Future.delayed(const Duration(milliseconds: 500), () {
+      final primary = pair.hasFront ? _frontPlayer : _backPlayer;
+      final dur = primary.state.duration;
+      if (dur > Duration.zero) {
+        onDurationResolved?.call(pair.id, dur);
+      }
+    });
 
     // Listen for end-of-file on the primary player
     _listenForEnd(pair);
@@ -393,7 +405,13 @@ final batchExportProvider = StateProvider<BatchExportState?>((ref) => null);
 final savingClipsProvider = StateProvider<String?>((ref) => null);
 
 // ─────────────────────────────────────────
-// 9. Volume per camera (0.0 - 100.0)
+// 9. Clip duration cache (populated after each loadPair)
+// ─────────────────────────────────────────
+
+final clipDurationCacheProvider = StateProvider<Map<String, Duration>>((ref) => {});
+
+// ─────────────────────────────────────────
+// 10. Volume per camera (0.0 - 100.0)
 // ─────────────────────────────────────────
 
 final frontVolumeProvider = StateProvider<double>((ref) => 100.0);

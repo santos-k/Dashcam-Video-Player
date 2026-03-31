@@ -217,6 +217,7 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                       current: current,
                       selectMode: selectMode,
                       selected: selected,
+                      durations: ref.watch(clipDurationCacheProvider),
                       onTap: (i) {
                         if (selectMode) {
                           _toggleSelection(selected, i);
@@ -236,6 +237,7 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                         isCurrent:  i == current,
                         selectMode: selectMode,
                         isSelected: selected.contains(i),
+                        duration:   ref.watch(clipDurationCacheProvider)[pairs[i].id],
                         onTap: () {
                           if (selectMode) {
                             _toggleSelection(selected, i);
@@ -413,6 +415,7 @@ class _ClipTile extends StatefulWidget {
   final bool         isCurrent;
   final bool         selectMode;
   final bool         isSelected;
+  final Duration?    duration;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -420,7 +423,7 @@ class _ClipTile extends StatefulWidget {
     required this.pair, required this.index,
     required this.isCurrent, required this.onTap,
     required this.selectMode, required this.isSelected,
-    required this.onLongPress,
+    required this.onLongPress, this.duration,
   });
 
   @override
@@ -509,9 +512,18 @@ class _ClipTileState extends State<_ClipTile> {
       ),
       subtitle: Row(children: [
         _badge(widget.pair),
+        if (widget.duration != null) ...[
+          const SizedBox(width: 6),
+          Text(_fmtDuration(widget.duration!),
+              style: const TextStyle(color: Colors.white38, fontSize: 10)),
+        ],
         if (widget.pair.isLocked) ...[
           const SizedBox(width: 4),
           _pill('locked', Colors.red.shade300),
+        ],
+        if (widget.pair.isRemote) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
         ],
       ]),
       trailing: widget.isCurrent
@@ -530,9 +542,19 @@ class _ClipTileState extends State<_ClipTile> {
   );
 
   static Widget _badge(VideoPair p) {
-    if (p.isPaired)  return _pill('F+B',    const Color(0xFF4FC3F7));
-    if (p.hasFront)  return _pill('F only', Colors.orange);
-    return                  _pill('B only', Colors.purple);
+    if (p.isPaired) return _pill('F+B', const Color(0xFF4FC3F7));
+    if (p.hasFront && !p.hasBack && p.source == 'local') {
+      return _pill('Video', Colors.teal);
+    }
+    if (p.hasFront) return _pill('F only', Colors.orange);
+    return _pill('B only', Colors.purple);
+  }
+
+  static String _fmtDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
   static Widget _pill(String text, Color color) => Container(
@@ -556,6 +578,7 @@ class _ThumbnailGrid extends StatelessWidget {
   final int current;
   final bool selectMode;
   final Set<int> selected;
+  final Map<String, Duration> durations;
   final void Function(int) onTap;
   final void Function(int) onLongPress;
 
@@ -565,6 +588,7 @@ class _ThumbnailGrid extends StatelessWidget {
     required this.current,
     required this.selectMode,
     required this.selected,
+    required this.durations,
     required this.onTap,
     required this.onLongPress,
   });
@@ -587,6 +611,7 @@ class _ThumbnailGrid extends StatelessWidget {
         isCurrent: i == current,
         selectMode: selectMode,
         isSelected: selected.contains(i),
+        duration: durations[pairs[i].id],
         onTap: () => onTap(i),
         onLongPress: () => onLongPress(i),
       ),
@@ -600,6 +625,7 @@ class _ThumbCard extends StatefulWidget {
   final bool isCurrent;
   final bool selectMode;
   final bool isSelected;
+  final Duration? duration;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -611,6 +637,7 @@ class _ThumbCard extends StatefulWidget {
     required this.isSelected,
     required this.onTap,
     required this.onLongPress,
+    this.duration,
   });
 
   @override
@@ -709,9 +736,19 @@ class _ThumbCardState extends State<_ThumbCard> {
                   const SizedBox(height: 2),
                   Row(children: [
                     _miniBadge(widget.pair),
+                    if (widget.duration != null) ...[
+                      const SizedBox(width: 4),
+                      Text(_fmtDur(widget.duration!),
+                          style: const TextStyle(color: Colors.white60,
+                              fontSize: 9, fontFamily: 'monospace')),
+                    ],
                     if (widget.pair.isLocked) ...[
                       const SizedBox(width: 3),
                       const Icon(Icons.lock, color: Colors.redAccent, size: 10),
+                    ],
+                    if (widget.pair.isRemote) ...[
+                      const SizedBox(width: 3),
+                      const Icon(Icons.wifi_rounded, size: 9, color: Color(0xFF4FC3F7)),
                     ],
                   ]),
                 ],
@@ -774,6 +811,13 @@ class _ThumbCardState extends State<_ThumbCard> {
         ]),
       ),
     );
+  }
+
+  static String _fmtDur(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
   Widget _placeholderIcon() => Container(

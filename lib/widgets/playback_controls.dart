@@ -21,6 +21,8 @@ class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback? onCloseFolder;
   final VoidCallback? onQuit;
   final VoidCallback? onMap;
+  final VoidCallback? onZoomIn;
+  final VoidCallback? onZoomOut;
   final VoidCallback? focusRequester;
 
   const PlaybackControls({
@@ -34,6 +36,8 @@ class PlaybackControls extends ConsumerStatefulWidget {
     this.onCloseFolder,
     this.onQuit,
     this.onMap,
+    this.onZoomIn,
+    this.onZoomOut,
     this.focusRequester,
   });
 
@@ -111,7 +115,22 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           const SizedBox(width: 4),
 
-          // Volume controls — shows slider on hover/click
+          // Zoom controls
+          _ToolBtn(
+            icon: Icons.zoom_in_rounded,
+            label: '+',
+            tooltip: 'Zoom in (${sc.label(ShortcutAction.zoomIn)})',
+            onPressed: () => widget.onZoomIn?.call(),
+          ),
+          _ToolBtn(
+            icon: Icons.zoom_out_rounded,
+            label: '-',
+            tooltip: 'Zoom out (${sc.label(ShortcutAction.zoomOut)})',
+            onPressed: () => widget.onZoomOut?.call(),
+          ),
+          const SizedBox(width: 4),
+
+          // Volume controls — vertical slider on hover
           if (playback.hasFront && playback.hasBack) ...[
             _VolumeBtn(
               label: 'F',
@@ -659,61 +678,86 @@ class _VolumeBtnState extends State<_VolumeBtn> {
     return MouseRegion(
       onEnter: (_) => setState(() => _showSlider = true),
       onExit: (_) => setState(() => _showSlider = false),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        // Mute/unmute icon button
-        GestureDetector(
-          onTap: widget.onMuteToggle,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            decoration: BoxDecoration(
-              color: _muted
-                  ? Colors.red.withValues(alpha: 0.15)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: _muted ? Colors.red.withValues(alpha: 0.5) : Colors.white12,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // Mute/unmute icon button
+          GestureDetector(
+            onTap: widget.onMuteToggle,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: _muted
+                    ? Colors.red.withValues(alpha: 0.15)
+                    : Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: _muted ? Colors.red.withValues(alpha: 0.5) : Colors.white12,
+                ),
               ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_icon, size: 13,
+                    color: _muted ? Colors.redAccent : Colors.white54),
+                const SizedBox(width: 4),
+                Text(widget.label,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: _muted ? Colors.redAccent : Colors.white54)),
+              ]),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(_icon, size: 13,
-                  color: _muted ? Colors.redAccent : Colors.white54),
-              const SizedBox(width: 4),
-              Text(widget.label,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                    color: _muted ? Colors.redAccent : Colors.white54)),
-            ]),
           ),
-        ),
-        // Volume slider (appears on hover)
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          child: _showSlider
-              ? SizedBox(
-                  width: 90,
-                  height: 24,
-                  child: SliderTheme(
-                    data: SliderThemeData(
-                      trackHeight: 3,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                      activeTrackColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
-                      inactiveTrackColor: Colors.white12,
-                      thumbColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
-                      overlayColor: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+          // Vertical volume slider popup (appears above on hover)
+          if (_showSlider)
+            Positioned(
+              bottom: 36,
+              left: 0,
+              child: Container(
+                width: 36,
+                height: 120,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      blurRadius: 12,
+                      offset: const Offset(0, -2),
                     ),
-                    child: Slider(
-                      value: widget.volume,
-                      min: 0,
-                      max: 100,
-                      onChanged: widget.onVolumeChanged,
+                  ],
+                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('${widget.volume.round()}',
+                      style: const TextStyle(color: Colors.white54,
+                          fontSize: 9, fontWeight: FontWeight.w600)),
+                  Expanded(
+                    child: RotatedBox(
+                      quarterTurns: 3,
+                      child: SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                          activeTrackColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
+                          inactiveTrackColor: Colors.white12,
+                          thumbColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
+                          overlayColor: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+                        ),
+                        child: Slider(
+                          value: widget.volume,
+                          min: 0,
+                          max: 100,
+                          onChanged: widget.onVolumeChanged,
+                        ),
+                      ),
                     ),
                   ),
-                )
-              : const SizedBox.shrink(),
-        ),
-      ]),
+                ]),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

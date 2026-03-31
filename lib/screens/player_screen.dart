@@ -55,7 +55,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     WakelockPlus.enable();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
-      ref.read(playbackProvider.notifier).onClipEnd = _onClipEnd;
+      final pn = ref.read(playbackProvider.notifier);
+      pn.onClipEnd = _onClipEnd;
+      pn.onDurationResolved = (id, dur) {
+        final cache = Map.of(ref.read(clipDurationCacheProvider));
+        cache[id] = dur;
+        ref.read(clipDurationCacheProvider.notifier).state = cache;
+      };
     });
   }
 
@@ -971,6 +977,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     onCloseFolder:  _confirmCloseFolder,
                     onQuit:         _confirmQuit,
                     onMap:          _toggleMapSidebar,
+                    onZoomIn:       () => _videoViewKey.currentState?.zoomIn(),
+                    onZoomOut:      () => _videoViewKey.currentState?.zoomOut(),
                     focusRequester: _focusNode.requestFocus,
                   )
                 : const SizedBox.shrink(),
