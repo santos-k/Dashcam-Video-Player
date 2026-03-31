@@ -155,6 +155,12 @@ class DualVideoViewState extends ConsumerState<DualVideoView> {
     final back  = _VideoPane(key: _backPaneKey, controller: _backController,  label: 'BACK');
 
     switch (layout.mode) {
+      case LayoutMode.frontOnly:
+        return front;
+
+      case LayoutMode.backOnly:
+        return back;
+
       case LayoutMode.sideBySide:
         return Row(children: [
           Expanded(child: front),

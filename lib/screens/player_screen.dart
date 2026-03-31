@@ -282,6 +282,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ref.read(layoutConfigProvider.notifier).state =
               config.copyWith(pipPrimary: next);
         }
+      case ShortcutAction.layoutFrontOnly:
+        if (!playback.hasFront || !playback.hasBack) return;
+        ref.read(layoutConfigProvider.notifier).state =
+            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.frontOnly);
+      case ShortcutAction.layoutBackOnly:
+        if (!playback.hasFront || !playback.hasBack) return;
+        ref.read(layoutConfigProvider.notifier).state =
+            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.backOnly);
       case ShortcutAction.layoutPopup:
         if (!playback.hasFront || !playback.hasBack) return;
         _showLayoutPopup();

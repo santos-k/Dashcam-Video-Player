@@ -1,6 +1,6 @@
 // lib/models/layout_config.dart
 
-enum LayoutMode  { sideBySide, stacked, pip }
+enum LayoutMode  { sideBySide, stacked, pip, frontOnly, backOnly }
 enum PipPrimary  { front, back }
 enum PipHAlign   { left, center, right }
 enum PipVAlign   { top, center, bottom }

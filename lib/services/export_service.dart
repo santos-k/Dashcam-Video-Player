@@ -71,9 +71,13 @@ class ExportService {
         ? (syncOffsetMs / 1000.0).toStringAsFixed(3)
         : '0';
 
-    // Single video (no front or no back)
-    if (!pair.isPaired) {
-      final input = pair.frontPath ?? pair.backPath!;
+    // Single video (no front or no back, or front/back only layout)
+    if (!pair.isPaired ||
+        layout.mode == LayoutMode.frontOnly ||
+        layout.mode == LayoutMode.backOnly) {
+      final input = layout.mode == LayoutMode.backOnly
+          ? (pair.backPath ?? pair.frontPath!)
+          : (pair.frontPath ?? pair.backPath!);
       return ['-i', input, '-c:v', 'libx264', '-crf', '23',
               '-preset', 'fast', '-c:a', 'aac', '-y', outputPath];
     }
@@ -119,6 +123,11 @@ class ExportService {
             'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[main];'
             '[$pipIdx:v]scale=480:270[pip];'
             '[main][pip]overlay=${pos[0]}:${pos[1]}[out]';
+      case LayoutMode.frontOnly:
+      case LayoutMode.backOnly:
+        // Single video — no filter graph needed, handled by _buildArgs
+        return '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,'
+            'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[out]';
     }
   }
 

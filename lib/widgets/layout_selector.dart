@@ -90,6 +90,10 @@ class _LayoutPanelState extends ConsumerState<_LayoutPanel> {
       notifier.state = config.copyWith(mode: LayoutMode.stacked);
     } else if (key == LogicalKeyboardKey.digit3) {
       notifier.state = config.copyWith(mode: LayoutMode.pip);
+    } else if (key == LogicalKeyboardKey.digit4) {
+      notifier.state = config.copyWith(mode: LayoutMode.frontOnly);
+    } else if (key == LogicalKeyboardKey.digit5) {
+      notifier.state = config.copyWith(mode: LayoutMode.backOnly);
     } else if (key == LogicalKeyboardKey.escape ||
                key == LogicalKeyboardKey.keyL) {
       widget.onClose();
@@ -148,6 +152,28 @@ class _LayoutPanelState extends ConsumerState<_LayoutPanel> {
               onTap: () => notifier.state =
                   config.copyWith(mode: LayoutMode.pip),
             ),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                child: _Chip(
+                  icon: Icons.camera_front_rounded, label: 'Front only',
+                  shortcut: '4',
+                  selected: config.mode == LayoutMode.frontOnly,
+                  onTap: () => notifier.state =
+                      config.copyWith(mode: LayoutMode.frontOnly),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _Chip(
+                  icon: Icons.camera_rear_rounded, label: 'Back only',
+                  shortcut: '5',
+                  selected: config.mode == LayoutMode.backOnly,
+                  onTap: () => notifier.state =
+                      config.copyWith(mode: LayoutMode.backOnly),
+                ),
+              ),
+            ]),
 
             // ── PIP options ────────────────────────────────
             AnimatedSize(

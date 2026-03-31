@@ -466,6 +466,8 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     LayoutMode.sideBySide => 'Side-by-side',
     LayoutMode.stacked    => 'Stacked',
     LayoutMode.pip        => 'PIP',
+    LayoutMode.frontOnly  => 'Front only',
+    LayoutMode.backOnly   => 'Back only',
   };
 
   String _fmt(Duration d) {
