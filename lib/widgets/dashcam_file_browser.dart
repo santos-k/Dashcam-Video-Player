@@ -244,8 +244,8 @@ class _FileTileState extends ConsumerState<_FileTile> {
       showAppNotification(
         context,
         ok ? 'Downloaded ${file.name}' : 'Download failed: ${file.name}',
-        icon: ok ? Icons.download_done_rounded : Icons.error_rounded,
-        color: ok ? const Color(0xFF4FC3F7) : Colors.redAccent,
+        icon: ok ? Icons.download_done_rounded : null,
+        type: ok ? NotificationType.success : NotificationType.error,
       );
     }
   }

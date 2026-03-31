@@ -1,19 +1,21 @@
 // lib/widgets/app_notification.dart
 //
-// Top-right slide-in notification that auto-dismisses after 5 seconds.
-// Replaces default SnackBar for a cleaner UX.
+// Top-right slide-in notification with solid color background.
+// Green = success, Red = error, Yellow/Amber = warning.
 
 import 'package:flutter/material.dart';
 
-/// Shows a top-right notification overlay on the given [context].
+enum NotificationType { success, error, warning }
+
+/// Shows a top-right notification overlay.
 /// Auto-dismisses after [duration] (default 5 seconds).
-/// Returns an [OverlayEntry] that can be removed early if needed.
 OverlayEntry showAppNotification(
   BuildContext context,
   String message, {
   Duration duration = const Duration(seconds: 5),
   IconData? icon,
   Color? color,
+  NotificationType type = NotificationType.success,
 }) {
   late OverlayEntry entry;
   entry = OverlayEntry(
@@ -21,7 +23,8 @@ OverlayEntry showAppNotification(
       message: message,
       duration: duration,
       icon: icon,
-      color: color,
+      type: type,
+      colorOverride: color,
       onDismiss: () {
         if (entry.mounted) entry.remove();
       },
@@ -35,14 +38,16 @@ class _AppNotification extends StatefulWidget {
   final String message;
   final Duration duration;
   final IconData? icon;
-  final Color? color;
+  final NotificationType type;
+  final Color? colorOverride;
   final VoidCallback onDismiss;
 
   const _AppNotification({
     required this.message,
     required this.duration,
     this.icon,
-    this.color,
+    required this.type,
+    this.colorOverride,
     required this.onDismiss,
   });
 
@@ -70,7 +75,6 @@ class _AppNotificationState extends State<_AppNotification>
     _fade = Tween(begin: 0.0, end: 1.0).animate(_anim);
 
     _anim.forward();
-
     Future.delayed(widget.duration, _dismiss);
   }
 
@@ -86,9 +90,23 @@ class _AppNotificationState extends State<_AppNotification>
     super.dispose();
   }
 
+  (Color bg, IconData icon) get _style {
+    if (widget.colorOverride == Colors.redAccent ||
+        widget.type == NotificationType.error) {
+      return (const Color(0xFFE53935), widget.icon ?? Icons.error_rounded);
+    }
+    if (widget.colorOverride == Colors.orange ||
+        widget.colorOverride == Colors.amber ||
+        widget.type == NotificationType.warning) {
+      return (const Color(0xFFFFA726), widget.icon ?? Icons.warning_rounded);
+    }
+    return (const Color(0xFF43A047), widget.icon ?? Icons.check_circle_rounded);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final color = widget.color ?? const Color(0xFF4FC3F7);
+    final (bgColor, iconData) = _style;
+
     return Positioned(
       top: 16,
       right: 16,
@@ -99,43 +117,41 @@ class _AppNotificationState extends State<_AppNotification>
           child: Material(
             color: Colors.transparent,
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 400, minWidth: 200),
-              padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+              constraints: const BoxConstraints(maxWidth: 420, minWidth: 180),
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: color.withValues(alpha: 0.3)),
+                color: bgColor,
+                borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    blurRadius: 16,
+                    color: bgColor.withValues(alpha: 0.4),
+                    blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(widget.icon ?? Icons.check_circle_rounded,
-                    color: color, size: 18),
+                Icon(iconData, color: Colors.white, size: 20),
                 const SizedBox(width: 10),
                 Flexible(
                   child: Text(
                     widget.message,
                     style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
+                      color: Colors.white,
+                      fontSize: 13,
                       fontWeight: FontWeight.w500,
                       decoration: TextDecoration.none,
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 InkWell(
                   onTap: _dismiss,
                   borderRadius: BorderRadius.circular(12),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
                     child: Icon(Icons.close_rounded,
-                        color: Colors.white38, size: 16),
+                        color: Colors.white.withValues(alpha: 0.8), size: 18),
                   ),
                 ),
               ]),

@@ -70,8 +70,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void _showNotification(BuildContext ctx, String message, {
     IconData? icon,
     Color? color,
+    NotificationType type = NotificationType.success,
   }) {
-    showAppNotification(ctx, message, icon: icon, color: color);
+    showAppNotification(ctx, message, icon: icon, color: color, type: type);
   }
 
   void _resetHideTimer() {
@@ -378,7 +379,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     if (mounted) {
       _showNotification(context, 'Scanning for dashcam videos...',
-          icon: Icons.search_rounded, color: Colors.amber);
+          icon: Icons.search_rounded, type: NotificationType.warning);
     }
 
     appLog('Folder', 'Scanning: $result');
@@ -388,7 +389,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (pairs.isEmpty) {
       if (mounted) {
         _showNotification(context, 'No dashcam videos found in $result',
-            icon: Icons.warning_rounded, color: Colors.orange);
+            type: NotificationType.warning);
       }
       _focusNode.requestFocus();
       return;
@@ -534,7 +535,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         Process.run('explorer', ['/select,', savePath]);
       } else {
         _showNotification(context, 'Export failed — is FFmpeg installed?',
-            icon: Icons.error_rounded, color: Colors.redAccent);
+            type: NotificationType.error);
       }
     }
     _focusNode.requestFocus();
@@ -742,8 +743,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               '${failed > 0 ? " ($failed failed)" : ""}'
           : 'Delete failed';
       _showNotification(context, msg,
-          icon: deleted > 0 ? Icons.delete_rounded : Icons.error_rounded,
-          color: deleted > 0 ? null : Colors.redAccent);
+          icon: deleted > 0 ? Icons.delete_rounded : null,
+          type: deleted > 0 ? NotificationType.success : NotificationType.error);
     }
     _focusNode.requestFocus();
   }

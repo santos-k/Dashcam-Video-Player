@@ -416,11 +416,11 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     if (mounted) {
       if (ok) {
         showAppNotification(ctx, 'Exported to $savePath',
-            icon: Icons.movie_creation_rounded);
+            icon: Icons.movie_creation_rounded, type: NotificationType.success);
         Process.run('explorer', ['/select,', savePath]);
       } else {
         showAppNotification(ctx, 'Export failed — is FFmpeg installed?',
-            icon: Icons.error_rounded, color: Colors.redAccent);
+            type: NotificationType.error);
       }
     }
   }
