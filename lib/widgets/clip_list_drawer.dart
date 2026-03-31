@@ -265,10 +265,9 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                         }
                       },
                       onLongPress: (i) => _enterSelectMode(i),
-                      onSelectGroup: (indices) {
-                        final updated = Set.of(selected)..addAll(indices);
-                        ref.read(selectedClipIndicesProvider.notifier).state = updated;
-                        if (!selectMode) {
+                      onSelectGroup: (newSelection) {
+                        ref.read(selectedClipIndicesProvider.notifier).state = newSelection;
+                        if (!selectMode && newSelection.isNotEmpty) {
                           ref.read(clipSelectionModeProvider.notifier).state = true;
                         }
                       },
@@ -279,9 +278,9 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
   }
 }
 
-// ─── Grouped list view ──────────────────────────────────────────────────────
+// ─── Grouped list view with collapsible sections ───────────────────────────
 
-class _GroupedListView extends StatelessWidget {
+class _GroupedListView extends StatefulWidget {
   final ScrollController scrollController;
   final List<VideoPair> pairs;
   final int current;
@@ -306,8 +305,15 @@ class _GroupedListView extends StatelessWidget {
     required this.onSelectGroup,
   });
 
-  String _groupKey(VideoPair p, int index) {
-    switch (groupBy) {
+  @override
+  State<_GroupedListView> createState() => _GroupedListViewState();
+}
+
+class _GroupedListViewState extends State<_GroupedListView> {
+  final Set<String> _collapsed = {};
+
+  String _groupKey(VideoPair p) {
+    switch (widget.groupBy) {
       case GroupBy.none:
         return '';
       case GroupBy.date:
@@ -323,76 +329,137 @@ class _GroupedListView extends StatelessWidget {
     }
   }
 
+  bool _isGroupAllSelected(List<int> indices) {
+    return indices.every((i) => widget.selected.contains(i));
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (groupBy == GroupBy.none) {
-      // No grouping — flat list
+    if (widget.groupBy == GroupBy.none) {
       return ListView.builder(
-        controller: scrollController,
-        itemCount: pairs.length,
+        controller: widget.scrollController,
+        itemCount: widget.pairs.length,
         itemBuilder: (ctx, i) => _ClipTile(
-          pair: pairs[i], index: i,
-          isCurrent: i == current,
-          selectMode: selectMode,
-          isSelected: selected.contains(i),
-          duration: durations[pairs[i].id],
-          onTap: () => onTap(i),
-          onLongPress: () => onLongPress(i),
+          pair: widget.pairs[i], index: i,
+          isCurrent: i == widget.current,
+          selectMode: widget.selectMode,
+          isSelected: widget.selected.contains(i),
+          duration: widget.durations[widget.pairs[i].id],
+          onTap: () => widget.onTap(i),
+          onLongPress: () => widget.onLongPress(i),
         ),
       );
     }
 
-    // Build grouped structure
-    final groups = <String, List<int>>{}; // group key -> list of pair indices
-    for (int i = 0; i < pairs.length; i++) {
-      final key = _groupKey(pairs[i], i);
+    // Build groups
+    final groups = <String, List<int>>{};
+    for (int i = 0; i < widget.pairs.length; i++) {
+      final key = _groupKey(widget.pairs[i]);
       groups.putIfAbsent(key, () => []).add(i);
     }
-
     final groupKeys = groups.keys.toList();
 
     return ListView.builder(
-      controller: scrollController,
+      controller: widget.scrollController,
       itemCount: groupKeys.length,
       itemBuilder: (ctx, gi) {
         final key = groupKeys[gi];
         final indices = groups[key]!;
+        final isCollapsed = _collapsed.contains(key);
+        final allSelected = _isGroupAllSelected(indices);
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Group header
+            // ── Group header (tap to expand/collapse) ──
             GestureDetector(
-              onTap: () => onSelectGroup(indices.toSet()),
+              onTap: () => setState(() {
+                if (isCollapsed) {
+                  _collapsed.remove(key);
+                } else {
+                  _collapsed.add(key);
+                }
+              }),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                color: const Color(0xFF1A1A1A),
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1A1A1A),
+                  border: Border(bottom: BorderSide(color: Colors.white10)),
+                ),
                 child: Row(children: [
+                  // Expand/collapse arrow
+                  Icon(
+                    isCollapsed
+                        ? Icons.chevron_right_rounded
+                        : Icons.expand_more_rounded,
+                    color: Colors.white38, size: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  // Group name
                   Expanded(
                     child: Text(key,
                       style: const TextStyle(color: Color(0xFF4FC3F7),
                           fontSize: 11, fontWeight: FontWeight.w700,
                           letterSpacing: 0.5)),
                   ),
-                  Text('${indices.length}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.select_all_rounded,
-                      color: Colors.white24, size: 12),
+                  // Count badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${indices.length}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 10,
+                          fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 6),
+                  // Select/deselect all in group
+                  GestureDetector(
+                    onTap: () {
+                      final updated = Set.of(widget.selected);
+                      if (allSelected) {
+                        updated.removeAll(indices);
+                      } else {
+                        updated.addAll(indices);
+                      }
+                      widget.onSelectGroup(updated);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: allSelected
+                            ? const Color(0xFF4FC3F7).withValues(alpha: 0.2)
+                            : Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Icon(
+                        allSelected
+                            ? Icons.deselect_rounded
+                            : Icons.select_all_rounded,
+                        color: allSelected
+                            ? const Color(0xFF4FC3F7)
+                            : Colors.white30,
+                        size: 14,
+                      ),
+                    ),
+                  ),
                 ]),
               ),
             ),
-            // Group items
-            for (final i in indices)
-              _ClipTile(
-                pair: pairs[i], index: i,
-                isCurrent: i == current,
-                selectMode: selectMode,
-                isSelected: selected.contains(i),
-                duration: durations[pairs[i].id],
-                onTap: () => onTap(i),
-                onLongPress: () => onLongPress(i),
-              ),
+            // ── Group items (hidden when collapsed) ──
+            if (!isCollapsed)
+              for (final i in indices)
+                _ClipTile(
+                  pair: widget.pairs[i], index: i,
+                  isCurrent: i == widget.current,
+                  selectMode: widget.selectMode,
+                  isSelected: widget.selected.contains(i),
+                  duration: widget.durations[widget.pairs[i].id],
+                  onTap: () => widget.onTap(i),
+                  onLongPress: () => widget.onLongPress(i),
+                ),
           ],
         );
       },
