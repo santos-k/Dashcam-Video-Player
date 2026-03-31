@@ -58,17 +58,19 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
         : List.of(_raw);
   }
 
-  /// Remove pairs at the given indices and return the removed pairs.
+  /// Remove pairs at the given indices (referencing current [state] order)
+  /// and return the removed pairs.
   List<VideoPair> removePairs(Set<int> indices) {
-    final removed = <VideoPair>[];
-    final sorted = indices.toList()..sort((a, b) => b.compareTo(a)); // reverse
-    for (final i in sorted) {
-      if (i >= 0 && i < _raw.length) {
-        removed.add(_raw.removeAt(i));
+    // Collect the actual VideoPair objects to remove (by identity, not index)
+    final toRemove = <VideoPair>{};
+    for (final i in indices) {
+      if (i >= 0 && i < state.length) {
+        toRemove.add(state[i]);
       }
     }
+    _raw.removeWhere((p) => toRemove.contains(p));
     state = List.of(_raw);
-    return removed;
+    return toRemove.toList();
   }
 
   /// Load dashcam WiFi files and pair them into VideoPairs.

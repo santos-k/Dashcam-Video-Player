@@ -14,6 +14,7 @@ import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
 import '../services/dashcam_service.dart';
+import '../widgets/app_notification.dart';
 import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
@@ -63,6 +64,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     WakelockPlus.disable();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Show a top-right slide-in notification (replaces SnackBar).
+  void _showNotification(BuildContext ctx, String message, {
+    IconData? icon,
+    Color? color,
+  }) {
+    showAppNotification(ctx, message, icon: icon, color: color);
   }
 
   void _resetHideTimer() {
@@ -368,28 +377,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Row(children: [
-          SizedBox(width: 16, height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-          SizedBox(width: 12),
-          Text('Scanning for dashcam videos...'),
-        ]),
-        duration: Duration(seconds: 30),
-      ));
+      _showNotification(context, 'Scanning for dashcam videos...',
+          icon: Icons.search_rounded, color: Colors.amber);
     }
 
     appLog('Folder', 'Scanning: $result');
     await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(result));
-    if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('No dashcam videos found in $result'),
-          duration: const Duration(seconds: 4),
-        ));
+        _showNotification(context, 'No dashcam videos found in $result',
+            icon: Icons.warning_rounded, color: Colors.orange);
       }
       _focusNode.requestFocus();
       return;
@@ -400,11 +399,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final backOnly  = pairs.where((p) => p.hasBack  && !p.hasFront).length;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          '${pairs.length} clips  ($paired paired · $frontOnly front-only · $backOnly back-only)'),
-        duration: const Duration(seconds: 3),
-      ));
+      _showNotification(context,
+          '${pairs.length} clips  ($paired paired, $frontOnly front-only, $backOnly back-only)',
+          icon: Icons.folder_open_rounded);
     }
 
     ref.read(currentIndexProvider.notifier).state = 0;
@@ -530,20 +527,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(exportProgressProvider.notifier).state = null;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(exportOk
-            ? 'Exported to $savePath'
-            : 'Export failed — is FFmpeg installed?'),
-        duration: const Duration(seconds: 5),
-        showCloseIcon: true,
-        closeIconColor: Colors.white54,
-        action: exportOk
-            ? SnackBarAction(
-                label: 'Open folder',
-                onPressed: () => Process.run('explorer', ['/select,', savePath]),
-              )
-            : null,
-      ));
+      if (exportOk) {
+        _showNotification(context, 'Exported to $savePath',
+            icon: Icons.movie_creation_rounded);
+        // Open folder in explorer
+        Process.run('explorer', ['/select,', savePath]);
+      } else {
+        _showNotification(context, 'Export failed — is FFmpeg installed?',
+            icon: Icons.error_rounded, color: Colors.redAccent);
+      }
     }
     _focusNode.requestFocus();
   }
@@ -694,25 +686,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
-    // Delete files from disk (skip remote WiFi files)
+    // Delete files from disk or dashcam
     int deleted = 0, failed = 0;
     for (final idx in toDelete) {
       final pair = pairs[idx];
       if (pair.isRemote) {
-        // Remote files — just remove from list, no disk delete
-        deleted++;
-        continue;
-      }
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          if (await file.exists()) {
-            await file.delete();
-            deleted++;
+        // WiFi dashcam files — delete via API
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final remotePath = Uri.parse(url).path; // e.g. /mnt/card/video_front/...
+          final ok = await DashcamService.deleteFile(remotePath);
+          if (ok) { deleted++; } else { failed++; }
+        }
+      } else {
+        // Local files — delete from disk
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            if (await file.exists()) {
+              await file.delete();
+              deleted++;
+            }
+          } catch (e) {
+            debugPrint('Delete failed: $e');
+            failed++;
           }
-        } catch (e) {
-          debugPrint('Delete failed: $e');
-          failed++;
         }
       }
     }
@@ -739,11 +737,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Deleted $deleted file${deleted != 1 ? "s" : ""}'
-            '${failed > 0 ? " ($failed failed)" : ""}'),
-        duration: const Duration(seconds: 3),
-      ));
+      final msg = deleted > 0
+          ? 'Deleted $deleted file${deleted != 1 ? "s" : ""}'
+              '${failed > 0 ? " ($failed failed)" : ""}'
+          : 'Delete failed';
+      _showNotification(context, msg,
+          icon: deleted > 0 ? Icons.delete_rounded : Icons.error_rounded,
+          color: deleted > 0 ? null : Colors.redAccent);
     }
     _focusNode.requestFocus();
   }

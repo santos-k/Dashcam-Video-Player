@@ -9,6 +9,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../models/dashcam_file.dart';
 import '../providers/dashcam_providers.dart';
+import 'app_notification.dart';
 
 class DashcamFileBrowser extends ConsumerWidget {
   final List<DashcamFile> files;
@@ -240,12 +241,12 @@ class _FileTileState extends ConsumerState<_FileTile> {
     final ok = await ref.read(dashcamProvider.notifier)
         .downloadFile(file, outDir);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Downloaded ${file.name}'
-            : 'Download failed: ${file.name}'),
-        duration: const Duration(seconds: 3),
-      ));
+      showAppNotification(
+        context,
+        ok ? 'Downloaded ${file.name}' : 'Download failed: ${file.name}',
+        icon: ok ? Icons.download_done_rounded : Icons.error_rounded,
+        color: ok ? const Color(0xFF4FC3F7) : Colors.redAccent,
+      );
     }
   }
 

@@ -9,6 +9,7 @@ import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../services/export_service.dart';
+import 'app_notification.dart';
 
 class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onPrevious;
@@ -413,23 +414,14 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     ref.read(exportProgressProvider.notifier).state = null;
 
     if (mounted) {
-      ScaffoldMessenger.of(ctx).clearSnackBars();
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Exported to $savePath'
-            : 'Export failed — is FFmpeg installed?'),
-        duration: const Duration(seconds: 5),
-        behavior: SnackBarBehavior.floating,
-        showCloseIcon: true,
-        closeIconColor: Colors.white54,
-        action: ok
-            ? SnackBarAction(
-                label: 'Open folder',
-                onPressed: () => Process.run(
-                    'explorer', ['/select,', savePath]),
-              )
-            : null,
-      ));
+      if (ok) {
+        showAppNotification(ctx, 'Exported to $savePath',
+            icon: Icons.movie_creation_rounded);
+        Process.run('explorer', ['/select,', savePath]);
+      } else {
+        showAppNotification(ctx, 'Export failed — is FFmpeg installed?',
+            icon: Icons.error_rounded, color: Colors.redAccent);
+      }
     }
   }
 

@@ -223,14 +223,15 @@ class DashcamService {
     return allFiles;
   }
 
-  /// List files from ALL folder types (loop + emr + park).
+  /// List files from ALL folder types (loop + emr + event + park).
   static Future<List<DashcamFile>> listAllFiles() async {
     final results = await Future.wait([
       listFiles(folder: 'loop'),
       listFiles(folder: 'emr'),
+      listFiles(folder: 'event'),
       listFiles(folder: 'park'),
     ]);
-    return [...results[0], ...results[1], ...results[2]];
+    return [...results[0], ...results[1], ...results[2], ...results[3]];
   }
 
   /// Get a thumbnail image as bytes.
@@ -254,6 +255,28 @@ class DashcamService {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Delete a file from the dashcam SD card.
+  /// [filePath]: full path, e.g. /mnt/card/video_front/20260329_190645_f.ts
+  static Future<bool> deleteFile(String filePath) async {
+    try {
+      final json = await _getJson(
+          'deletefile?file=${Uri.encodeComponent(filePath)}');
+      return _isOk(json);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Capture an instant photo snapshot from the active camera.
+  static Future<bool> takeSnapshot() async {
+    try {
+      final json = await _getJson('snapshot');
+      return _isOk(json);
+    } catch (_) {
+      return false;
     }
   }
 

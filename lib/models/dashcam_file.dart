@@ -59,6 +59,7 @@ class DashcamFile {
   String get folderLabel => switch (folder) {
         'loop' => 'Normal',
         'emr' => 'Emergency',
+        'event' => 'Event',
         'park' => 'Parking',
         _ => folder,
       };
