@@ -53,8 +53,9 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     final sortOrder   = ref.watch(sortOrderProvider);
     final layout      = ref.watch(layoutConfigProvider);
     final exportProg  = ref.watch(exportProgressProvider);
-    final frontMuted  = ref.watch(frontMutedProvider);
-    final backMuted   = ref.watch(backMutedProvider);
+    // Volume providers (kept for reference in controls below)
+    // final frontVolume = ref.watch(frontVolumeProvider);
+    // final backVolume  = ref.watch(backVolumeProvider);
     final saveProgress = ref.watch(savingClipsProvider);
     final isSaving     = saveProgress != null;
     final notifier    = ref.read(playbackProvider.notifier);
@@ -110,54 +111,70 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           const SizedBox(width: 4),
 
-          // Mute buttons — single button when only one camera, F/B when paired
+          // Volume controls — shows slider on hover/click
           if (playback.hasFront && playback.hasBack) ...[
-            _MuteBtn(
-              label:   'F',
-              tooltip: frontMuted ? 'Unmute front camera (${sc.label(ShortcutAction.muteFront)})' : 'Mute front camera (${sc.label(ShortcutAction.muteFront)})',
-              muted:   frontMuted,
-              onTap: () {
-                final next = !frontMuted;
-                ref.read(frontMutedProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontMuted(next);
+            _VolumeBtn(
+              label: 'F',
+              volume: ref.watch(frontVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(frontVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setFrontVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(frontVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(frontVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontVolume(next);
                 widget.focusRequester?.call();
               },
             ),
             const SizedBox(width: 4),
-            _MuteBtn(
-              label:   'B',
-              tooltip: backMuted ? 'Unmute back camera (${sc.label(ShortcutAction.muteBack)})' : 'Mute back camera (${sc.label(ShortcutAction.muteBack)})',
-              muted:   backMuted,
-              onTap: () {
-                final next = !backMuted;
-                ref.read(backMutedProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackMuted(next);
+            _VolumeBtn(
+              label: 'B',
+              volume: ref.watch(backVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(backVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setBackVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(backVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(backVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackVolume(next);
                 widget.focusRequester?.call();
               },
             ),
             const SizedBox(width: 4),
           ] else if (playback.hasFront) ...[
-            _MuteBtn(
-              label:   'Mute',
-              tooltip: frontMuted ? 'Unmute (${sc.label(ShortcutAction.muteFront)})' : 'Mute (${sc.label(ShortcutAction.muteFront)})',
-              muted:   frontMuted,
-              onTap: () {
-                final next = !frontMuted;
-                ref.read(frontMutedProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontMuted(next);
+            _VolumeBtn(
+              label: 'Vol',
+              volume: ref.watch(frontVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(frontVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setFrontVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(frontVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(frontVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontVolume(next);
                 widget.focusRequester?.call();
               },
             ),
             const SizedBox(width: 4),
           ] else if (playback.hasBack) ...[
-            _MuteBtn(
-              label:   'Mute',
-              tooltip: backMuted ? 'Unmute (${sc.label(ShortcutAction.muteBack)})' : 'Mute (${sc.label(ShortcutAction.muteBack)})',
-              muted:   backMuted,
-              onTap: () {
-                final next = !backMuted;
-                ref.read(backMutedProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackMuted(next);
+            _VolumeBtn(
+              label: 'Vol',
+              volume: ref.watch(backVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(backVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setBackVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(backVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(backVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackVolume(next);
                 widget.focusRequester?.call();
               },
             ),
@@ -606,49 +623,95 @@ class _NavBtn extends StatelessWidget {
   );
 }
 
-// ─── Mute button ─────────────────────────────────────────────────────────────
+// ─── Volume button with slider popup ─────────────────────────────────────────
 
-class _MuteBtn extends StatelessWidget {
-  final String   label;
-  final String   tooltip;
-  final bool     muted;
-  final VoidCallback onTap;
-  const _MuteBtn({required this.label, required this.tooltip, required this.muted, required this.onTap});
+class _VolumeBtn extends StatefulWidget {
+  final String label;
+  final double volume; // 0-100
+  final ValueChanged<double> onVolumeChanged;
+  final VoidCallback onMuteToggle;
+  const _VolumeBtn({
+    required this.label,
+    required this.volume,
+    required this.onVolumeChanged,
+    required this.onMuteToggle,
+  });
+
+  @override
+  State<_VolumeBtn> createState() => _VolumeBtnState();
+}
+
+class _VolumeBtnState extends State<_VolumeBtn> {
+  bool _showSlider = false;
+
+  bool get _muted => widget.volume <= 0;
+
+  IconData get _icon {
+    if (_muted) return Icons.volume_off_rounded;
+    if (widget.volume < 50) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: muted
-                ? Colors.red.withValues(alpha: 0.15)
-                : Colors.white.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: muted ? Colors.red.withValues(alpha: 0.5) : Colors.white12,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _showSlider = true),
+      onExit: (_) => setState(() => _showSlider = false),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        // Mute/unmute icon button
+        GestureDetector(
+          onTap: widget.onMuteToggle,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: _muted
+                  ? Colors.red.withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: _muted ? Colors.red.withValues(alpha: 0.5) : Colors.white12,
+              ),
             ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(_icon, size: 13,
+                  color: _muted ? Colors.redAccent : Colors.white54),
+              const SizedBox(width: 4),
+              Text(widget.label,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    color: _muted ? Colors.redAccent : Colors.white54)),
+            ]),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(
-              muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-              size: 13,
-              color: muted ? Colors.redAccent : Colors.white54,
-            ),
-            const SizedBox(width: 4),
-            Text(label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: muted ? Colors.redAccent : Colors.white54,
-              )),
-          ]),
         ),
-      ),
+        // Volume slider (appears on hover)
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: _showSlider
+              ? SizedBox(
+                  width: 90,
+                  height: 24,
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                      activeTrackColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
+                      inactiveTrackColor: Colors.white12,
+                      thumbColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
+                      overlayColor: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+                    ),
+                    child: Slider(
+                      value: widget.volume,
+                      min: 0,
+                      max: 100,
+                      onChanged: widget.onVolumeChanged,
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ]),
     );
   }
 }

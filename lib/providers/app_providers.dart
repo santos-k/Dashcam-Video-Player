@@ -299,12 +299,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     state = PlaybackState.initial();
   }
 
-  Future<void> setFrontMuted(bool muted) async {
-    await _frontPlayer.setVolume(muted ? 0 : 100);
+  Future<void> setFrontVolume(double volume) async {
+    await _frontPlayer.setVolume(volume.clamp(0, 100));
   }
 
-  Future<void> setBackMuted(bool muted) async {
-    await _backPlayer.setVolume(muted ? 0 : 100);
+  Future<void> setBackVolume(double volume) async {
+    await _backPlayer.setVolume(volume.clamp(0, 100));
   }
 
   Future<void> setSpeed(double speed) async {
@@ -393,11 +393,11 @@ final batchExportProvider = StateProvider<BatchExportState?>((ref) => null);
 final savingClipsProvider = StateProvider<String?>((ref) => null);
 
 // ─────────────────────────────────────────
-// 9. Mute state per camera
+// 9. Volume per camera (0.0 - 100.0)
 // ─────────────────────────────────────────
 
-final frontMutedProvider = StateProvider<bool>((ref) => false);
-final backMutedProvider  = StateProvider<bool>((ref) => false);
+final frontVolumeProvider = StateProvider<double>((ref) => 100.0);
+final backVolumeProvider  = StateProvider<double>((ref) => 100.0);
 
 // PIP position reset signal
 final pipResetProvider = StateProvider<int>((ref) => 0);

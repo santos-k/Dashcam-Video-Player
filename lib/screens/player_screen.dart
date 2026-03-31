@@ -219,23 +219,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       case ShortcutAction.muteFront:
         if (!playback.isLoaded) return;
         if (playback.hasFront && !playback.hasBack) {
-          final next = !ref.read(frontMutedProvider);
-          ref.read(frontMutedProvider.notifier).state = next;
-          notifier.setFrontMuted(next);
+          final cur = ref.read(frontVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(frontVolumeProvider.notifier).state = next;
+          notifier.setFrontVolume(next);
         } else if (!playback.hasFront && playback.hasBack) {
-          final next = !ref.read(backMutedProvider);
-          ref.read(backMutedProvider.notifier).state = next;
-          notifier.setBackMuted(next);
+          final cur = ref.read(backVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(backVolumeProvider.notifier).state = next;
+          notifier.setBackVolume(next);
         } else {
-          final next = !ref.read(frontMutedProvider);
-          ref.read(frontMutedProvider.notifier).state = next;
-          notifier.setFrontMuted(next);
+          final cur = ref.read(frontVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(frontVolumeProvider.notifier).state = next;
+          notifier.setFrontVolume(next);
         }
       case ShortcutAction.muteBack:
         if (!playback.isLoaded) return;
-        final next = !ref.read(backMutedProvider);
-        ref.read(backMutedProvider.notifier).state = next;
-        notifier.setBackMuted(next);
+        final cur = ref.read(backVolumeProvider);
+        final next = cur > 0 ? 0.0 : 100.0;
+        ref.read(backVolumeProvider.notifier).state = next;
+        notifier.setBackVolume(next);
       case ShortcutAction.speedUp:
         if (!playback.isLoaded) return;
         final cur = ref.read(playbackSpeedProvider);
@@ -472,8 +476,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state = 0;
     ref.read(playbackSpeedProvider.notifier).state = 1.0;
-    ref.read(frontMutedProvider.notifier).state = false;
-    ref.read(backMutedProvider.notifier).state = false;
+    ref.read(frontVolumeProvider.notifier).state = 100.0;
+    ref.read(backVolumeProvider.notifier).state = 100.0;
     _focusNode.requestFocus();
   }
 
