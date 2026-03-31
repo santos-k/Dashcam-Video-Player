@@ -52,6 +52,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void initState() {
     super.initState();
     WakelockPlus.enable();
+    // Register global keyboard handler — works even when Video widget
+    // steals focus from _focusNode after a clip loads.
+    HardwareKeyboard.instance.addHandler(_globalKeyHandler);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
       final pn = ref.read(playbackProvider.notifier);
@@ -72,9 +75,35 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
     WakelockPlus.disable();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Global keyboard handler — fires regardless of which widget has focus.
+  /// This solves the issue where media_kit's Video widget steals focus
+  /// after a clip loads, making KeyboardListener's onKeyEvent stop firing.
+  bool _globalKeyHandler(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (!mounted) return false;
+    final key = event.logicalKey;
+
+    // Backslash / pipe toggles controls
+    if (key == LogicalKeyboardKey.backslash ||
+        key == LogicalKeyboardKey.bar ||
+        key == LogicalKeyboardKey.intlBackslash) {
+      setState(() => _overlayVisible = !_overlayVisible);
+      _focusNode.requestFocus();
+      return true;
+    }
+
+    // Reclaim focus on any key press so KeyboardListener works again.
+    if (!_focusNode.hasPrimaryFocus) {
+      _focusNode.requestFocus();
+    }
+
+    return false;
   }
 
   /// Show a top-right slide-in notification (replaces SnackBar).
@@ -94,7 +123,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   /// Force controls visible — used after clip load completes.
   void _ensureControlsVisible() {
-    if (mounted) setState(() => _overlayVisible = true);
+    if (mounted) {
+      setState(() => _overlayVisible = true);
+      _focusNode.requestFocus();
+    }
   }
 
   void _handleKey(KeyEvent event) {
@@ -544,11 +576,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final pair = ref.read(currentPairProvider);
     if (pair == null) return;
     if (ref.read(exportProgressProvider) != null) return; // already exporting
+    final origName = pair.frontFile?.uri.pathSegments.last ?? pair.backFile?.uri.pathSegments.last;
+    final exportMsg = origName != null
+        ? 'Export clip "${pair.id}" ($origName) with current layout settings?'
+        : 'Export clip "${pair.id}" with current layout settings?';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => _ConfirmDialog(
         title: 'Export Video',
-        message: 'Export clip "${pair.id}" with current layout settings?',
+        message: exportMsg,
         confirmLabel: 'Export',
         confirmColor: const Color(0xFF4FC3F7),
       ),
@@ -557,9 +593,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (ok != true) return;
     // Trigger the export via the controls widget's method isn't accessible,
     // so we replicate the logic here
+    // Use original filename (without extension) if available
+    final origBase = pair.frontFile?.uri.pathSegments.last.replaceAll(RegExp(r'\.[^.]+$'), '')
+        ?? pair.backFile?.uri.pathSegments.last.replaceAll(RegExp(r'\.[^.]+$'), '');
+    final exportName = origBase != null ? 'dashcam_$origBase.mp4' : 'dashcam_${pair.id}.mp4';
     final savePath = await FilePicker.platform.saveFile(
       dialogTitle:   'Save exported video',
-      fileName:      'dashcam_${pair.id}.mp4',
+      fileName:      exportName,
       allowedExtensions: ['mp4'],
       type: FileType.custom,
     );
@@ -939,15 +979,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 : const SizedBox.shrink(),
           ),
 
-          // Video area — tap toggles controls visibility
+          // Video area — press \ to toggle controls
           Expanded(
             child: GestureDetector(
-              onTap: () {
-                _focusNode.requestFocus();
-                setState(() => _overlayVisible = !_overlayVisible);
-              },
+              onTap: () => _focusNode.requestFocus(),
               child: Stack(children: [
-                DualVideoView(key: _videoViewKey),
+                // Prevent Video widget from stealing keyboard focus
+                ExcludeFocus(child: DualVideoView(key: _videoViewKey)),
                 if (pairs.isEmpty) _EmptyState(onOpen: _pickFolder),
                 // About overlay — rendered in-widget so I key toggle works
                 if (_aboutOpen)
@@ -1004,6 +1042,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     focusRequester: _focusNode.requestFocus,
                   )
                 : const SizedBox.shrink(),
+          ),
+
+          // Always-visible toggle handle — guaranteed to work because it's
+          // outside the video area (native texture can't steal these events).
+          GestureDetector(
+            onTap: () {
+              _focusNode.requestFocus();
+              setState(() => _overlayVisible = !_overlayVisible);
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Container(
+                height: _overlayVisible ? 0 : 18,
+                width: double.infinity,
+                color: const Color(0xFF1A1A1A),
+                alignment: Alignment.center,
+                child: _overlayVisible
+                    ? null
+                    : Container(
+                        width: 40, height: 4,
+                        margin: const EdgeInsets.only(top: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4FC3F7),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+              ),
+            ),
           ),
         ]),
       ),
@@ -1540,6 +1606,12 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                             ? Colors.orange
                             : Colors.purple;
 
+                // Original filename for display
+                final origName = pair.frontFile?.uri.pathSegments.last
+                    ?? pair.backFile?.uri.pathSegments.last
+                    ?? (pair.frontUrl != null ? Uri.parse(pair.frontUrl!).pathSegments.last : null)
+                    ?? (pair.backUrl  != null ? Uri.parse(pair.backUrl!).pathSegments.last  : null);
+
                 return CheckboxListTile(
                   value: checked,
                   activeColor: const Color(0xFF4FC3F7),
@@ -1577,6 +1649,14 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                     if (pair.isRemote) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
+                    ],
+                    if (origName != null) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(origName,
+                          style: const TextStyle(color: Colors.white30, fontSize: 9),
+                          overflow: TextOverflow.ellipsis),
+                      ),
                     ],
                   ]),
                   dense: true,

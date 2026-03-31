@@ -27,11 +27,10 @@ class ClipListDrawer extends ConsumerStatefulWidget {
 class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
   ScrollController _scrollController = ScrollController();
 
-  // Approximate heights for scroll offset calculation
-  static const double _listTileHeight = 64.0;
-  static const double _gridRowHeight  = 140.0;
-
   ClipViewMode? _lastViewMode;
+
+  /// Key attached to the currently playing clip widget for ensureVisible.
+  final GlobalKey _currentClipKey = GlobalKey();
 
   @override
   void initState() {
@@ -46,29 +45,13 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
   }
 
   void _scrollToCurrentClip({bool animate = false}) {
-    if (!_scrollController.hasClients) return;
-    final current  = ref.read(currentIndexProvider);
-    final viewMode = ref.read(clipViewModeProvider);
-    final viewportH = _scrollController.position.viewportDimension;
-
-    double itemOffset;
-    if (viewMode == ClipViewMode.thumbnail) {
-      final row = current ~/ 2;
-      itemOffset = row * (_gridRowHeight + 6);
-    } else {
-      itemOffset = current * _listTileHeight;
-    }
-
-    // Center the item in the viewport
-    final offset = (itemOffset - viewportH / 2 + _listTileHeight / 2)
-        .clamp(0.0, _scrollController.position.maxScrollExtent);
-
-    if (animate) {
-      _scrollController.animateTo(offset,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic);
-    } else {
-      _scrollController.jumpTo(offset);
+    final ctx = _currentClipKey.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+        alignment: 0.5,
+        duration: animate ? const Duration(milliseconds: 300) : Duration.zero,
+        curve: Curves.easeOutCubic,
+      );
     }
   }
 
@@ -233,6 +216,7 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
               : viewMode == ClipViewMode.thumbnail
                   ? _GroupedGridView(
                       scrollController: _scrollController,
+                      currentClipKey: _currentClipKey,
                       pairs: pairs,
                       current: current,
                       selectMode: selectMode,
@@ -257,6 +241,7 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                     )
                   : _GroupedListView(
                       scrollController: _scrollController,
+                      currentClipKey: _currentClipKey,
                       pairs: pairs,
                       current: current,
                       selectMode: selectMode,
@@ -289,6 +274,7 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
 
 class _GroupedListView extends StatefulWidget {
   final ScrollController scrollController;
+  final GlobalKey? currentClipKey;
   final List<VideoPair> pairs;
   final int current;
   final bool selectMode;
@@ -301,6 +287,7 @@ class _GroupedListView extends StatefulWidget {
 
   const _GroupedListView({
     required this.scrollController,
+    this.currentClipKey,
     required this.pairs,
     required this.current,
     required this.selectMode,
@@ -347,6 +334,7 @@ class _GroupedListViewState extends State<_GroupedListView> {
         controller: widget.scrollController,
         itemCount: widget.pairs.length,
         itemBuilder: (ctx, i) => _ClipTile(
+          key: i == widget.current ? widget.currentClipKey : null,
           pair: widget.pairs[i], index: i,
           isCurrent: i == widget.current,
           selectMode: widget.selectMode,
@@ -459,6 +447,7 @@ class _GroupedListViewState extends State<_GroupedListView> {
             if (!isCollapsed)
               for (final i in indices)
                 _ClipTile(
+                  key: i == widget.current ? widget.currentClipKey : null,
                   pair: widget.pairs[i], index: i,
                   isCurrent: i == widget.current,
                   selectMode: widget.selectMode,
@@ -639,6 +628,7 @@ class _ClipTile extends StatefulWidget {
   final VoidCallback onLongPress;
 
   const _ClipTile({
+    super.key,
     required this.pair, required this.index,
     required this.isCurrent, required this.onTap,
     required this.selectMode, required this.isSelected,
@@ -651,6 +641,23 @@ class _ClipTile extends StatefulWidget {
 
 class _ClipTileState extends State<_ClipTile> {
   String? _thumbPath;
+
+  /// Original filename(s) for display.
+  String? get _originalName {
+    final f = widget.pair.frontFile;
+    final b = widget.pair.backFile;
+    if (f != null && b != null) {
+      return '${f.uri.pathSegments.last} / ${b.uri.pathSegments.last}';
+    }
+    if (f != null) return f.uri.pathSegments.last;
+    if (b != null) return b.uri.pathSegments.last;
+    // Remote files
+    final fu = widget.pair.frontUrl;
+    final bu = widget.pair.backUrl;
+    if (fu != null) return Uri.parse(fu).pathSegments.last;
+    if (bu != null) return Uri.parse(bu).pathSegments.last;
+    return null;
+  }
 
   @override
   void initState() {
@@ -744,6 +751,15 @@ class _ClipTileState extends State<_ClipTile> {
           const SizedBox(width: 4),
           const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
         ],
+        if (_originalName != null) ...[
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(_originalName!,
+              style: const TextStyle(color: Colors.white30, fontSize: 9),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ]),
       trailing: widget.isCurrent
           ? const Icon(Icons.play_arrow_rounded,
@@ -793,6 +809,7 @@ class _ClipTileState extends State<_ClipTile> {
 
 class _GroupedGridView extends StatefulWidget {
   final ScrollController? scrollController;
+  final GlobalKey? currentClipKey;
   final List<VideoPair> pairs;
   final int current;
   final bool selectMode;
@@ -805,6 +822,7 @@ class _GroupedGridView extends StatefulWidget {
 
   const _GroupedGridView({
     this.scrollController,
+    this.currentClipKey,
     required this.pairs,
     required this.current,
     required this.selectMode,
@@ -842,6 +860,7 @@ class _GroupedGridViewState extends State<_GroupedGridView> {
     if (widget.groupBy == GroupBy.none) {
       return _ThumbnailGrid(
         scrollController: widget.scrollController,
+        currentClipKey: widget.currentClipKey,
         pairs: widget.pairs,
         current: widget.current,
         selectMode: widget.selectMode,
@@ -946,6 +965,7 @@ class _GroupedGridViewState extends State<_GroupedGridView> {
                   children: [
                     for (final i in indices)
                       _ThumbCard(
+                        key: i == widget.current ? widget.currentClipKey : null,
                         pair: widget.pairs[i],
                         index: i,
                         isCurrent: i == widget.current,
@@ -969,6 +989,7 @@ class _GroupedGridViewState extends State<_GroupedGridView> {
 
 class _ThumbnailGrid extends StatelessWidget {
   final ScrollController? scrollController;
+  final GlobalKey? currentClipKey;
   final List<VideoPair> pairs;
   final int current;
   final bool selectMode;
@@ -979,6 +1000,7 @@ class _ThumbnailGrid extends StatelessWidget {
 
   const _ThumbnailGrid({
     this.scrollController,
+    this.currentClipKey,
     required this.pairs,
     required this.current,
     required this.selectMode,
@@ -1001,6 +1023,7 @@ class _ThumbnailGrid extends StatelessWidget {
       ),
       itemCount: pairs.length,
       itemBuilder: (_, i) => _ThumbCard(
+        key: i == current ? currentClipKey : null,
         pair: pairs[i],
         index: i,
         isCurrent: i == current,
@@ -1025,6 +1048,7 @@ class _ThumbCard extends StatefulWidget {
   final VoidCallback onLongPress;
 
   const _ThumbCard({
+    super.key,
     required this.pair,
     required this.index,
     required this.isCurrent,
@@ -1042,6 +1066,19 @@ class _ThumbCard extends StatefulWidget {
 class _ThumbCardState extends State<_ThumbCard> {
   String? _thumbPath;
   bool _loading = true;
+
+  /// Original filename for display.
+  String? get _fileName {
+    final f = widget.pair.frontFile;
+    final b = widget.pair.backFile;
+    if (f != null) return f.uri.pathSegments.last;
+    if (b != null) return b.uri.pathSegments.last;
+    final fu = widget.pair.frontUrl;
+    final bu = widget.pair.backUrl;
+    if (fu != null) return Uri.parse(fu).pathSegments.last;
+    if (bu != null) return Uri.parse(bu).pathSegments.last;
+    return null;
+  }
 
   @override
   void initState() {
@@ -1146,6 +1183,11 @@ class _ThumbCardState extends State<_ThumbCard> {
                       const Icon(Icons.wifi_rounded, size: 9, color: Color(0xFF4FC3F7)),
                     ],
                   ]),
+                  if (_fileName != null)
+                    Text(_fileName!,
+                      style: const TextStyle(color: Colors.white38, fontSize: 8),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ),
             ),

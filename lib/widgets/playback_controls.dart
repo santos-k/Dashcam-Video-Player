@@ -421,10 +421,13 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     final pair = ref.read(currentPairProvider);
     if (pair == null) return;
 
-    // Ask for output path
+    // Ask for output path — include original filename if available
+    final origBase = pair.frontFile?.uri.pathSegments.last.replaceAll(RegExp(r'\.[^.]+$'), '')
+        ?? pair.backFile?.uri.pathSegments.last.replaceAll(RegExp(r'\.[^.]+$'), '');
+    final exportName = origBase != null ? 'dashcam_$origBase.mp4' : 'dashcam_${pair.id}.mp4';
     final savePath = await FilePicker.platform.saveFile(
       dialogTitle:   'Save exported video',
-      fileName:      'dashcam_${pair.id}.mp4',
+      fileName:      exportName,
       allowedExtensions: ['mp4'],
       type: FileType.custom,
     );

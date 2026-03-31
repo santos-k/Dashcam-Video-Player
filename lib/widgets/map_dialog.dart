@@ -5,6 +5,7 @@
 // tile layer) is persisted via Riverpod so it survives open/close cycles.
 // Shows device location by default on first open.
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -45,6 +46,11 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   // Marker position (null = no marker)
   LatLng? _marker;
 
+  // GPS track for synced map (from .ts files)
+  List<(double, double, double)>? _gpsTrack; // (seconds, lat, lon)
+  bool _trackSyncing = false;
+  StreamSubscription? _trackSub;
+
   static const _tileLayers = [
     (label: 'Standard', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     (label: 'Topo',     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
@@ -54,18 +60,19 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   @override
   void initState() {
     super.initState();
-    // Restore persisted state
-    final saved = ref.read(mapStateProvider);
-    if (saved.lat != null && saved.lon != null) {
-      _latCtrl.text = saved.lat!.toStringAsFixed(6);
-      _lonCtrl.text = saved.lon!.toStringAsFixed(6);
-      _marker = LatLng(saved.lat!, saved.lon!);
-    } else if (widget.videoPath != null) {
-      // Try extracting GPS from video metadata first
+    // Always try extracting GPS from current video first
+    if (widget.videoPath != null) {
       _tryExtractGPS();
     } else {
-      // No saved coords, no video — get device location
-      _tryDeviceLocation();
+      // Restore persisted state or get device location
+      final saved = ref.read(mapStateProvider);
+      if (saved.lat != null && saved.lon != null) {
+        _latCtrl.text = saved.lat!.toStringAsFixed(6);
+        _lonCtrl.text = saved.lon!.toStringAsFixed(6);
+        _marker = LatLng(saved.lat!, saved.lon!);
+      } else {
+        _tryDeviceLocation();
+      }
     }
   }
 
@@ -79,6 +86,7 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
 
   @override
   void dispose() {
+    _trackSub?.cancel();
     _latCtrl.dispose();
     _lonCtrl.dispose();
     _mapController.dispose();
@@ -161,7 +169,28 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
   }
 
   Future<void> _tryExtractGPS() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _gpsTrack = null; _trackSyncing = false; });
+
+    // Try extracting GPS track (per-second points for synced map)
+    final track = await ExportService.extractGPSTrack(widget.videoPath!);
+    if (!mounted) return;
+    if (track != null && track.isNotEmpty) {
+      _gpsTrack = track;
+      _trackSyncing = true;
+      // Set initial marker to first point
+      final (_, lat, lon) = track.first;
+      _latCtrl.text = lat.toStringAsFixed(6);
+      _lonCtrl.text = lon.toStringAsFixed(6);
+      _marker = LatLng(lat, lon);
+      _moveToMarker(_coordZoom);
+      _persist();
+      appLog('Map', 'GPS track loaded: ${track.length} points');
+      if (mounted) setState(() => _loading = false);
+      _startTrackSync();
+      return;
+    }
+
+    // Fall back to single GPS extraction
     final coords = await ExportService.extractGPS(widget.videoPath!);
     if (!mounted) return;
     if (coords != null) {
@@ -180,6 +209,50 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
       }
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// Sync map marker with video playback position using GPS track.
+  void _startTrackSync() {
+    _trackSub?.cancel();
+    if (_gpsTrack == null || !_trackSyncing) return;
+
+    // Use whichever player is active (front preferred)
+    final notifier = ref.read(playbackProvider.notifier);
+    final playback = ref.read(playbackProvider);
+    final player = playback.hasFront ? notifier.frontPlayer : notifier.backPlayer;
+
+    _trackSub = player.stream.position.listen((pos) {
+      if (!mounted || !_trackSyncing || _gpsTrack == null) return;
+      final secs = pos.inMilliseconds / 1000.0;
+
+      // Binary-search style: find closest GPS point to current playback position
+      (double, double, double)? closest;
+      double minDiff = double.infinity;
+      for (final point in _gpsTrack!) {
+        final diff = (point.$1 - secs).abs();
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = point;
+        }
+        // Points are sorted by time; if diff starts increasing, stop early
+        if (diff > minDiff) break;
+      }
+
+      if (closest != null && minDiff < 2.0) {
+        final (_, lat, lon) = closest;
+        if (_marker == null || _marker!.latitude != lat || _marker!.longitude != lon) {
+          final newMarker = LatLng(lat, lon);
+          setState(() {
+            _marker = newMarker;
+            _latCtrl.text = lat.toStringAsFixed(6);
+            _lonCtrl.text = lon.toStringAsFixed(6);
+          });
+          try {
+            _mapController.move(newMarker, _mapController.camera.zoom);
+          } catch (_) {}
+        }
+      }
+    });
   }
 
   void _searchCoords() {
@@ -268,6 +341,24 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
                         const Text('GPS / Map',
                           style: TextStyle(color: Colors.white, fontSize: 14,
                               fontWeight: FontWeight.w600)),
+                        if (_trackSyncing && _gpsTrack != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.sync_rounded,
+                                  size: 10, color: Color(0xFF4FC3F7)),
+                              const SizedBox(width: 3),
+                              Text('${_gpsTrack!.length}pts',
+                                style: const TextStyle(color: Color(0xFF4FC3F7),
+                                    fontSize: 9, fontWeight: FontWeight.w600)),
+                            ]),
+                          ),
+                        ],
                         const Spacer(),
                         _IconBtn(
                           icon: Icons.my_location_rounded,
@@ -388,6 +479,17 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
                             userAgentPackageName: 'com.dashcam.player',
                             maxZoom: 18,
                           ),
+                          // GPS track polyline
+                          if (_gpsTrack != null && _gpsTrack!.length > 1)
+                            PolylineLayer(polylines: [
+                              Polyline(
+                                points: _gpsTrack!
+                                    .map((p) => LatLng(p.$2, p.$3))
+                                    .toList(),
+                                color: const Color(0xFF4FC3F7),
+                                strokeWidth: 3.0,
+                              ),
+                            ]),
                           // Marker
                           if (_marker != null)
                             MarkerLayer(markers: [
