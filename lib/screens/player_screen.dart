@@ -87,9 +87,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _showControls() {
-    if (!_overlayVisible) {
+    if (!_overlayVisible && mounted) {
       setState(() => _overlayVisible = true);
     }
+  }
+
+  /// Force controls visible — used after clip load completes.
+  void _ensureControlsVisible() {
+    if (mounted) setState(() => _overlayVisible = true);
   }
 
   void _handleKey(KeyEvent event) {
@@ -381,7 +386,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(playbackProvider.notifier)
         .loadPair(pairs[index], 0, autoPlay: autoPlay)
         .then((_) {
-      // Re-apply current speed to the new clip
+      _ensureControlsVisible();
       if (speed != 1.0) {
         ref.read(playbackProvider.notifier).setSpeed(speed);
       }
@@ -442,6 +447,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final notifier = ref.read(playbackProvider.notifier);
     notifier.onClipEnd = _onClipEnd;
     await notifier.loadPair(pairs.first, 0, autoPlay: false);
+    _ensureControlsVisible();
     _focusNode.requestFocus();
 
     // Pre-generate thumbnails in background
