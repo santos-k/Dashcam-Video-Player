@@ -10,12 +10,19 @@ class DualVideoView extends ConsumerStatefulWidget {
   const DualVideoView({super.key});
 
   @override
-  ConsumerState<DualVideoView> createState() => _DualVideoViewState();
+  ConsumerState<DualVideoView> createState() => DualVideoViewState();
 }
 
-class _DualVideoViewState extends ConsumerState<DualVideoView> {
+class DualVideoViewState extends ConsumerState<DualVideoView> {
   late VideoController _frontController;
   late VideoController _backController;
+  final GlobalKey<_VideoPaneState> _frontPaneKey = GlobalKey<_VideoPaneState>();
+  final GlobalKey<_VideoPaneState> _backPaneKey  = GlobalKey<_VideoPaneState>();
+
+  /// Zoom all visible video panes in/out/reset.
+  void zoomIn()    { _frontPaneKey.currentState?.zoomIn();  _backPaneKey.currentState?.zoomIn(); }
+  void zoomOut()   { _frontPaneKey.currentState?.zoomOut(); _backPaneKey.currentState?.zoomOut(); }
+  void resetZoom() { _frontPaneKey.currentState?.resetZoom(); _backPaneKey.currentState?.resetZoom(); }
 
   // PIP drag state — stored as fractional position within the video rect
   // (-1, -1) = not placed yet, use default alignment
@@ -134,18 +141,18 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
 
     // Single video modes
     if (playback.hasFront && !playback.hasBack) {
-      return _VideoPane(controller: _frontController, label: 'FRONT');
+      return _VideoPane(key: _frontPaneKey, controller: _frontController, label: 'FRONT');
     }
     if (playback.hasBack && !playback.hasFront) {
-      return _VideoPane(controller: _backController, label: 'BACK');
+      return _VideoPane(key: _backPaneKey, controller: _backController, label: 'BACK');
     }
     if (!playback.hasFront && !playback.hasBack) {
       return const Center(
         child: Text('No video', style: TextStyle(color: Colors.white38)));
     }
 
-    final front = _VideoPane(controller: _frontController, label: 'FRONT');
-    final back  = _VideoPane(controller: _backController,  label: 'BACK');
+    final front = _VideoPane(key: _frontPaneKey, controller: _frontController, label: 'FRONT');
+    final back  = _VideoPane(key: _backPaneKey, controller: _backController,  label: 'BACK');
 
     switch (layout.mode) {
       case LayoutMode.sideBySide:
@@ -282,23 +289,84 @@ class _DualVideoViewState extends ConsumerState<DualVideoView> {
 
 // ─── Video pane ───────────────────────────────────────────────────────────────
 
-class _VideoPane extends StatelessWidget {
+class _VideoPane extends StatefulWidget {
   final VideoController controller;
   final String label;
-  const _VideoPane({required this.controller, required this.label});
+  const _VideoPane({super.key, required this.controller, required this.label});
+
+  @override
+  State<_VideoPane> createState() => _VideoPaneState();
+}
+
+class _VideoPaneState extends State<_VideoPane> {
+  final TransformationController _transform = TransformationController();
+  double _currentScale = 1.0;
+
+  @override
+  void dispose() {
+    _transform.dispose();
+    super.dispose();
+  }
+
+  void zoomIn() {
+    _currentScale = (_currentScale * 1.25).clamp(1.0, 8.0);
+    _applyScale();
+  }
+
+  void zoomOut() {
+    _currentScale = (_currentScale / 1.25).clamp(1.0, 8.0);
+    _applyScale();
+  }
+
+  void resetZoom() {
+    _currentScale = 1.0;
+    _transform.value = Matrix4.identity();
+  }
+
+  void _applyScale() {
+    // Zoom towards center
+    final size = context.size;
+    if (size == null) return;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    _transform.value = Matrix4.identity()
+      ..translate(cx * (1 - _currentScale), cy * (1 - _currentScale))
+      ..scale(_currentScale);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(children: [
       Container(color: Colors.black),
-      Center(
-        child: Video(
-          controller: controller,
-          controls:   NoVideoControls,
-          fit:        BoxFit.contain,
+      InteractiveViewer(
+        transformationController: _transform,
+        minScale: 1.0,
+        maxScale: 8.0,
+        onInteractionEnd: (_) {
+          _currentScale = _transform.value.getMaxScaleOnAxis();
+        },
+        child: Center(
+          child: Video(
+            controller: widget.controller,
+            controls: NoVideoControls,
+            fit: BoxFit.contain,
+          ),
         ),
       ),
-      // labels removed — camera identity shown in controls bar only
+      // Zoom level indicator (only when zoomed)
+      if (_currentScale > 1.05)
+        Positioned(
+          top: 8, right: 8,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text('${_currentScale.toStringAsFixed(1)}x',
+                style: const TextStyle(color: Colors.white60, fontSize: 10)),
+          ),
+        ),
     ]);
   }
 }

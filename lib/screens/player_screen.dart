@@ -47,6 +47,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
+  final GlobalKey<DualVideoViewState> _videoViewKey = GlobalKey<DualVideoViewState>();
 
   @override
   void initState() {
@@ -309,6 +310,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _toggleFullscreen();
       case ShortcutAction.shortcutSettings:
         _showShortcutSettings();
+      case ShortcutAction.zoomIn:
+        _videoViewKey.currentState?.zoomIn();
+      case ShortcutAction.zoomOut:
+        _videoViewKey.currentState?.zoomOut();
+      case ShortcutAction.zoomReset:
+        _videoViewKey.currentState?.resetZoom();
       case ShortcutAction.wifiDashcam:
         setState(() => _dashcamOpen = !_dashcamOpen);
         appLog('Shortcut', 'N – toggle Wi-Fi dashcam');
@@ -901,7 +908,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 }
               },
               child: Stack(children: [
-                const DualVideoView(),
+                DualVideoView(key: _videoViewKey),
                 if (pairs.isEmpty) _EmptyState(onOpen: _pickFolder),
                 // About overlay — rendered in-widget so I key toggle works
                 if (_aboutOpen)
@@ -1306,6 +1313,9 @@ class _EmptyState extends ConsumerWidget {
                       _kb(sc.label(ShortcutAction.previousClip), 'Previous clip'),
                       _kb('${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)}', 'Speed down / up'),
                       _kb(sc.label(ShortcutAction.speedReset), 'Reset speed 1x'),
+                      _kb(sc.label(ShortcutAction.zoomIn), 'Zoom in'),
+                      _kb(sc.label(ShortcutAction.zoomOut), 'Zoom out'),
+                      _kb(sc.label(ShortcutAction.zoomReset), 'Reset zoom'),
                       const SizedBox(height: 10),
                       _sectionLabel('Audio'),
                       _kb(sc.label(ShortcutAction.muteFront), 'Mute front'),
