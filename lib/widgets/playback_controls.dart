@@ -115,91 +115,6 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           const SizedBox(width: 4),
 
-          // Zoom controls
-          _ToolBtn(
-            icon: Icons.zoom_in_rounded,
-            label: '+',
-            tooltip: 'Zoom in (${sc.label(ShortcutAction.zoomIn)})',
-            onPressed: () => widget.onZoomIn?.call(),
-          ),
-          _ToolBtn(
-            icon: Icons.zoom_out_rounded,
-            label: '-',
-            tooltip: 'Zoom out (${sc.label(ShortcutAction.zoomOut)})',
-            onPressed: () => widget.onZoomOut?.call(),
-          ),
-          const SizedBox(width: 4),
-
-          // Volume controls — vertical slider on hover
-          if (playback.hasFront && playback.hasBack) ...[
-            _VolumeBtn(
-              label: 'F',
-              volume: ref.watch(frontVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(frontVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setFrontVolume(v);
-              },
-              onMuteToggle: () {
-                final cur = ref.read(frontVolumeProvider);
-                final next = cur > 0 ? 0.0 : 100.0;
-                ref.read(frontVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontVolume(next);
-                widget.focusRequester?.call();
-              },
-            ),
-            const SizedBox(width: 4),
-            _VolumeBtn(
-              label: 'B',
-              volume: ref.watch(backVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(backVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setBackVolume(v);
-              },
-              onMuteToggle: () {
-                final cur = ref.read(backVolumeProvider);
-                final next = cur > 0 ? 0.0 : 100.0;
-                ref.read(backVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackVolume(next);
-                widget.focusRequester?.call();
-              },
-            ),
-            const SizedBox(width: 4),
-          ] else if (playback.hasFront) ...[
-            _VolumeBtn(
-              label: 'Vol',
-              volume: ref.watch(frontVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(frontVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setFrontVolume(v);
-              },
-              onMuteToggle: () {
-                final cur = ref.read(frontVolumeProvider);
-                final next = cur > 0 ? 0.0 : 100.0;
-                ref.read(frontVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontVolume(next);
-                widget.focusRequester?.call();
-              },
-            ),
-            const SizedBox(width: 4),
-          ] else if (playback.hasBack) ...[
-            _VolumeBtn(
-              label: 'Vol',
-              volume: ref.watch(backVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(backVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setBackVolume(v);
-              },
-              onMuteToggle: () {
-                final cur = ref.read(backVolumeProvider);
-                final next = cur > 0 ? 0.0 : 100.0;
-                ref.read(backVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackVolume(next);
-                widget.focusRequester?.call();
-              },
-            ),
-            const SizedBox(width: 4),
-          ],
-
           // Layout — only useful when both cameras are present
           if (playback.hasFront && playback.hasBack)
             _ToolBtn(
@@ -371,6 +286,87 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
               widget.focusRequester?.call();
             },
           ),
+
+          const SizedBox(width: 8),
+
+          // Zoom controls
+          _NavBtn(icon: Icons.zoom_in_rounded,
+            enabled: isLoaded,
+            tooltip: 'Zoom in (${sc.label(ShortcutAction.zoomIn)})',
+            onPressed: () => widget.onZoomIn?.call()),
+          _NavBtn(icon: Icons.zoom_out_rounded,
+            enabled: isLoaded,
+            tooltip: 'Zoom out (${sc.label(ShortcutAction.zoomOut)})',
+            onPressed: () => widget.onZoomOut?.call()),
+
+          const SizedBox(width: 4),
+
+          // Volume controls
+          if (playback.hasFront && playback.hasBack) ...[
+            _VolumeBtn(
+              label: 'F',
+              volume: ref.watch(frontVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(frontVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setFrontVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(frontVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(frontVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontVolume(next);
+                widget.focusRequester?.call();
+              },
+            ),
+            const SizedBox(width: 2),
+            _VolumeBtn(
+              label: 'B',
+              volume: ref.watch(backVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(backVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setBackVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(backVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(backVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackVolume(next);
+                widget.focusRequester?.call();
+              },
+            ),
+          ] else if (playback.hasFront) ...[
+            _VolumeBtn(
+              label: 'Vol',
+              volume: ref.watch(frontVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(frontVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setFrontVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(frontVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(frontVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setFrontVolume(next);
+                widget.focusRequester?.call();
+              },
+            ),
+          ] else if (playback.hasBack) ...[
+            _VolumeBtn(
+              label: 'Vol',
+              volume: ref.watch(backVolumeProvider),
+              onVolumeChanged: (v) {
+                ref.read(backVolumeProvider.notifier).state = v;
+                ref.read(playbackProvider.notifier).setBackVolume(v);
+              },
+              onMuteToggle: () {
+                final cur = ref.read(backVolumeProvider);
+                final next = cur > 0 ? 0.0 : 100.0;
+                ref.read(backVolumeProvider.notifier).state = next;
+                ref.read(playbackProvider.notifier).setBackVolume(next);
+                widget.focusRequester?.call();
+              },
+            ),
+          ],
 
           const Spacer(),
 
