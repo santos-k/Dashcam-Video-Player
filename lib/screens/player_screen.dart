@@ -43,7 +43,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
   bool _aboutOpen           = false;   // track About popup for toggle
   bool _dashcamOpen         = false;   // dashcam Wi-Fi overlay
-  Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
@@ -73,7 +72,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   @override
   void dispose() {
-    _hideTimer?.cancel();
     WakelockPlus.disable();
     _focusNode.dispose();
     super.dispose();
@@ -88,16 +86,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     showAppNotification(ctx, message, icon: icon, color: color, type: type);
   }
 
-  void _resetHideTimer() {
+  void _showControls() {
     if (!_overlayVisible) {
       setState(() => _overlayVisible = true);
     }
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && ref.read(playbackProvider).isPlaying) {
-        setState(() => _overlayVisible = false);
-      }
-    });
   }
 
   void _handleKey(KeyEvent event) {
@@ -382,7 +374,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
     // Close dashcam overlay and show controls when navigating clips
     if (_dashcamOpen) setState(() => _dashcamOpen = false);
-    _resetHideTimer();
+    _showControls();
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     final speed = ref.read(playbackSpeedProvider);
@@ -925,9 +917,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           videoPath: mapVideoPath,
           onClose: () => _focusNode.requestFocus(),
         ),
-        body: MouseRegion(
-          onHover: (_) => _resetHideTimer(),
-          child: Column(children: [
+        body: Column(children: [
           // Top bar — collapses when hidden so video fills space
           AnimatedSize(
             duration: const Duration(milliseconds: 200),
@@ -948,12 +938,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             child: GestureDetector(
               onTap: () {
                 _focusNode.requestFocus();
-                if (_overlayVisible) {
-                  _hideTimer?.cancel();
-                  setState(() => _overlayVisible = false);
-                } else {
-                  _resetHideTimer();
-                }
+                setState(() => _overlayVisible = !_overlayVisible);
               },
               child: Stack(children: [
                 DualVideoView(key: _videoViewKey),
@@ -1015,7 +1000,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 : const SizedBox.shrink(),
           ),
         ]),
-        ),
       ),
     );
   }

@@ -231,12 +231,13 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                     style: TextStyle(color: Colors.white38, fontSize: 13),
                   ))
               : viewMode == ClipViewMode.thumbnail
-                  ? _ThumbnailGrid(
+                  ? _GroupedGridView(
                       scrollController: _scrollController,
                       pairs: pairs,
                       current: current,
                       selectMode: selectMode,
                       selected: selected,
+                      groupBy: ref.watch(groupByProvider),
                       durations: ref.watch(clipDurationCacheProvider),
                       onTap: (i) {
                         if (selectMode) {
@@ -247,6 +248,12 @@ class _ClipListDrawerState extends ConsumerState<ClipListDrawer> {
                         }
                       },
                       onLongPress: (i) => _enterSelectMode(i),
+                      onSelectGroup: (newSelection) {
+                        ref.read(selectedClipIndicesProvider.notifier).state = newSelection;
+                        if (!selectMode && newSelection.isNotEmpty) {
+                          ref.read(clipSelectionModeProvider.notifier).state = true;
+                        }
+                      },
                     )
                   : _GroupedListView(
                       scrollController: _scrollController,
@@ -780,6 +787,182 @@ class _ClipTileState extends State<_ClipTile> {
       style: TextStyle(
           color: color, fontSize: 10, fontWeight: FontWeight.w600)),
   );
+}
+
+// ─── Grouped thumbnail grid view ────────────────────────────────────────────
+
+class _GroupedGridView extends StatefulWidget {
+  final ScrollController? scrollController;
+  final List<VideoPair> pairs;
+  final int current;
+  final bool selectMode;
+  final Set<int> selected;
+  final GroupBy groupBy;
+  final Map<String, Duration> durations;
+  final void Function(int) onTap;
+  final void Function(int) onLongPress;
+  final void Function(Set<int>) onSelectGroup;
+
+  const _GroupedGridView({
+    this.scrollController,
+    required this.pairs,
+    required this.current,
+    required this.selectMode,
+    required this.selected,
+    required this.groupBy,
+    required this.durations,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onSelectGroup,
+  });
+
+  @override
+  State<_GroupedGridView> createState() => _GroupedGridViewState();
+}
+
+class _GroupedGridViewState extends State<_GroupedGridView> {
+  final Set<String> _collapsed = {};
+
+  String _groupKey(VideoPair p) {
+    switch (widget.groupBy) {
+      case GroupBy.none: return '';
+      case GroupBy.date: return DateFormat('yyyy-MM-dd').format(p.timestamp);
+      case GroupBy.type:
+        if (p.isPaired) return 'Paired (F+B)';
+        if (p.hasFront && !p.hasBack && p.source == 'local') return 'Video';
+        if (p.hasFront) return 'Front only';
+        return 'Back only';
+      case GroupBy.source:
+        return p.isRemote ? 'WiFi Dashcam' : 'Local';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.groupBy == GroupBy.none) {
+      return _ThumbnailGrid(
+        scrollController: widget.scrollController,
+        pairs: widget.pairs,
+        current: widget.current,
+        selectMode: widget.selectMode,
+        selected: widget.selected,
+        durations: widget.durations,
+        onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
+      );
+    }
+
+    // Build groups
+    final groups = <String, List<int>>{};
+    for (int i = 0; i < widget.pairs.length; i++) {
+      final key = _groupKey(widget.pairs[i]);
+      groups.putIfAbsent(key, () => []).add(i);
+    }
+    final groupKeys = groups.keys.toList();
+
+    return ListView.builder(
+      controller: widget.scrollController,
+      itemCount: groupKeys.length,
+      itemBuilder: (ctx, gi) {
+        final key = groupKeys[gi];
+        final indices = groups[key]!;
+        final isCollapsed = _collapsed.contains(key);
+        final allSelected = indices.every((i) => widget.selected.contains(i));
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Group header
+            GestureDetector(
+              onTap: () => setState(() {
+                if (isCollapsed) _collapsed.remove(key);
+                else _collapsed.add(key);
+              }),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1A1A1A),
+                  border: Border(bottom: BorderSide(color: Colors.white10)),
+                ),
+                child: Row(children: [
+                  Icon(isCollapsed
+                      ? Icons.chevron_right_rounded
+                      : Icons.expand_more_rounded,
+                    color: Colors.white38, size: 18),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(key,
+                    style: const TextStyle(color: Color(0xFF4FC3F7),
+                        fontSize: 11, fontWeight: FontWeight.w700))),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${indices.length}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 10,
+                          fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: () {
+                      final updated = Set.of(widget.selected);
+                      if (allSelected) {
+                        updated.removeAll(indices);
+                      } else {
+                        updated.addAll(indices);
+                      }
+                      widget.onSelectGroup(updated);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: allSelected
+                            ? const Color(0xFF4FC3F7).withValues(alpha: 0.2)
+                            : Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Icon(
+                        allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+                        color: allSelected ? const Color(0xFF4FC3F7) : Colors.white30,
+                        size: 14),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+            // Grid items (hidden when collapsed)
+            if (!isCollapsed)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 6,
+                  mainAxisSpacing: 6,
+                  childAspectRatio: 1.1,
+                  children: [
+                    for (final i in indices)
+                      _ThumbCard(
+                        pair: widget.pairs[i],
+                        index: i,
+                        isCurrent: i == widget.current,
+                        selectMode: widget.selectMode,
+                        isSelected: widget.selected.contains(i),
+                        duration: widget.durations[widget.pairs[i].id],
+                        onTap: () => widget.onTap(i),
+                        onLongPress: () => widget.onLongPress(i),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 // ─── Thumbnail grid view ────────────────────────────────────────────────────
