@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DashCam Player v2.0 — Dual Camera Video Player, Wi-Fi Dashcam & Exporter</title>
-  <meta name="description" content="Play, sync, and export paired front & back dashcam videos. Wi-Fi dashcam connection, customizable shortcuts, GPS map, thumbnail browser, and FFmpeg export. Free & open source.">
-  <meta name="keywords" content="dashcam player, dual camera, video player, flutter, windows, pip, side by side, gps map, ffmpeg export, wifi dashcam, onelap, customizable shortcuts">
-  <meta property="og:title" content="DashCam Player v2.0 — Dual Camera Video Player">
-  <meta property="og:description" content="Play paired dashcam videos with Wi-Fi dashcam connection, customizable shortcuts, GPS map, and FFmpeg export.">
+  <title>DashCam Player v3.0 — Universal Video Player, Wi-Fi Dashcam & Exporter</title>
+  <meta name="description" content="Play any video format with dual camera sync, Wi-Fi dashcam connection, zoom, volume control, clip grouping, and FFmpeg export. Free & open source.">
+  <meta name="keywords" content="dashcam player, video player, dual camera, flutter, windows, pip, side by side, gps map, ffmpeg export, wifi dashcam, onelap, zoom, volume, clip browser, universal video player">
+  <meta property="og:title" content="DashCam Player v3.0 — Universal Video Player & Wi-Fi Dashcam">
+  <meta property="og:description" content="Play any video with dual camera sync, Wi-Fi dashcam connection, zoom, volume sliders, and smart clip grouping.">
   <meta property="og:image" content="assets/screenshots/side_by_side.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -47,7 +47,6 @@
     a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
     a:hover { color: #b3e5fc; }
 
-    /* ── Animated background ────────────────────────────── */
     .bg-glow {
       position: fixed; inset: 0; z-index: -1; pointer-events: none;
       background:
@@ -101,306 +100,84 @@
       align-items: center; justify-content: center;
       text-align: center;
       padding: 120px 24px 60px;
-      position: relative;
     }
 
     .hero-badge {
       display: inline-flex; align-items: center; gap: 8px;
-      padding: 7px 18px;
-      border-radius: 24px;
-      background: linear-gradient(135deg, var(--accent-glow), var(--accent2-glow));
+      padding: 6px 16px; border-radius: 20px;
+      background: rgba(79,195,247,0.08);
       border: 1px solid rgba(79,195,247,0.15);
-      color: var(--accent);
-      font-size: 0.82rem; font-weight: 600;
-      margin-bottom: 32px;
-      animation: fadeInUp 0.6s ease-out;
+      font-size: 0.82rem; color: var(--accent); font-weight: 600;
+      margin-bottom: 28px;
     }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent3); }
 
-    .hero-badge .dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--accent3);
-      box-shadow: 0 0 8px var(--accent3);
-      animation: pulse 2s infinite;
-    }
+    .hero h1 { font-size: 3.5rem; font-weight: 900; line-height: 1.1; margin-bottom: 18px; letter-spacing: -1px; }
+    .gradient { background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+    .subtitle { color: var(--text-mid); font-size: 1.15rem; max-width: 640px; margin-bottom: 36px; }
 
-    .hero h1 {
-      font-size: clamp(2.6rem, 6vw, 4.2rem);
-      font-weight: 900; letter-spacing: -0.04em;
-      line-height: 1.1; margin-bottom: 20px;
-      animation: fadeInUp 0.6s ease-out 0.1s both;
-    }
-
-    .hero h1 .gradient {
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero .subtitle {
-      font-size: 1.2rem; color: var(--text-mid);
-      max-width: 620px; margin-bottom: 40px;
-      animation: fadeInUp 0.6s ease-out 0.2s both;
-    }
-
-    .hero-actions {
-      display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
-      margin-bottom: 16px;
-      animation: fadeInUp 0.6s ease-out 0.3s both;
-    }
+    .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
 
     .btn {
       display: inline-flex; align-items: center; gap: 8px;
-      padding: 14px 32px; border-radius: 12px;
-      font-size: 0.95rem; font-weight: 600;
-      transition: all 0.25s; cursor: pointer; border: none;
+      padding: 14px 28px; border-radius: 10px;
+      font-weight: 600; font-size: 0.95rem;
+      transition: all 0.2s; cursor: pointer; border: none;
     }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover { background: #80d4fa; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(79,195,247,0.2); }
+    .btn-outline { background: transparent; border: 1px solid var(--border-light); color: var(--text); }
+    .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent), #29b6f6);
-      color: #000;
-      box-shadow: 0 4px 24px rgba(79,195,247,0.25), inset 0 1px 0 rgba(255,255,255,0.2);
-    }
-    .btn-primary:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(79,195,247,0.35); color: #000; }
+    .meta { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 48px; }
 
-    .btn-outline {
-      background: rgba(255,255,255,0.04);
-      color: var(--text); border: 1px solid var(--border-light);
-    }
-    .btn-outline:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
-
-    .hero .meta {
-      color: var(--text-dim); font-size: 0.82rem; margin-top: 10px;
-      animation: fadeInUp 0.6s ease-out 0.4s both;
-    }
-
-    /* ── Hero screenshot ──────────────────────────────── */
     .showcase-hero {
-      max-width: 1060px; margin: 56px auto 0; padding: 0 24px;
-      animation: fadeInUp 0.8s ease-out 0.5s both;
-    }
-
-    .showcase-hero img {
-      width: 100%; border-radius: var(--radius);
+      max-width: 900px; width: 100%;
+      border-radius: var(--radius); overflow: hidden;
       border: 1px solid var(--border);
-      box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(79,195,247,0.05);
+      cursor: pointer;
+      transition: transform 0.3s, box-shadow 0.3s;
     }
+    .showcase-hero:hover { transform: translateY(-4px); box-shadow: 0 20px 60px rgba(79,195,247,0.1); }
+    .showcase-hero img { width: 100%; display: block; }
+    .caption { color: var(--text-dim); font-size: 0.82rem; padding: 12px; background: var(--surface); }
 
-    .showcase-hero .caption {
-      text-align: center; color: var(--text-dim);
-      font-size: 0.82rem; margin-top: 14px;
-    }
-
-    /* ── Stats ribbon ─────────────────────────────────── */
+    /* ── Stats ─────────────────────────────────────────── */
     .stats {
-      display: flex; justify-content: center; gap: 56px;
-      flex-wrap: wrap; padding: 56px 24px;
+      display: flex; justify-content: center; gap: 48px;
+      padding: 48px 24px;
       border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
       background: var(--surface);
     }
-
     .stat { text-align: center; }
-    .stat-value {
-      font-size: 2.2rem; font-weight: 900;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .stat-label { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; font-weight: 500; }
+    .stat-value { font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .stat-label { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; }
 
     /* ── Section ───────────────────────────────────────── */
-    .section { max-width: 1160px; margin: 0 auto; padding: 90px 24px; }
+    .section { max-width: 1200px; margin: 0 auto; padding: 80px 24px; }
+    .section-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--accent); margin-bottom: 10px; }
+    .section-title { font-size: 2.2rem; font-weight: 800; margin-bottom: 10px; }
+    .section-subtitle { color: var(--text-mid); font-size: 1.05rem; margin-bottom: 48px; max-width: 600px; }
 
-    .section-label {
-      text-align: center; text-transform: uppercase;
-      font-size: 0.72rem; font-weight: 700; letter-spacing: 3px;
-      color: var(--accent); margin-bottom: 10px;
-    }
-
-    .section-title {
-      text-align: center;
-      font-size: clamp(1.7rem, 3.5vw, 2.4rem);
-      font-weight: 800; margin-bottom: 12px; letter-spacing: -0.02em;
-    }
-
-    .section-subtitle {
-      text-align: center; color: var(--text-mid);
-      margin-bottom: 56px; font-size: 1.05rem;
-      max-width: 560px; margin-left: auto; margin-right: auto;
-    }
-
-    /* ── Showcase — Bento grid ────────────────────────── */
-    .bento {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      grid-auto-rows: minmax(180px, auto);
-      gap: 16px;
-    }
-
-    .bento-card {
-      position: relative; border-radius: var(--radius);
-      overflow: hidden; cursor: pointer;
-      border: 1px solid var(--border);
-      background: var(--card);
-      transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    }
-
-    .bento-card:hover {
-      border-color: rgba(79,195,247,0.35);
-      transform: translateY(-5px) scale(1.01);
-      box-shadow:
-        0 20px 60px rgba(0,0,0,0.4),
-        0 0 40px rgba(79,195,247,0.06);
-      z-index: 2;
-    }
-
-    .bento-card img {
-      width: 100%; height: 100%;
-      object-fit: cover; display: block;
-      transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    }
-
-    .bento-card:hover img { transform: scale(1.04); }
-
-    /* Overlay with glass effect */
-    .bento-info {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      padding: 20px 18px 16px;
-      background: linear-gradient(transparent 0%, rgba(6,6,11,0.75) 40%, rgba(6,6,11,0.95) 100%);
-      backdrop-filter: blur(6px);
-      transform: translateY(4px);
-      opacity: 0.92;
-      transition: all 0.3s;
-    }
-
-    .bento-card:hover .bento-info {
-      transform: translateY(0);
-      opacity: 1;
-    }
-
-    .bento-num {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 22px; height: 22px; border-radius: 6px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      color: #000; font-size: 0.7rem; font-weight: 800;
-      margin-bottom: 8px;
-    }
-
-    .bento-info h4 {
-      font-size: 0.95rem; font-weight: 700;
-      margin-bottom: 4px; letter-spacing: -0.01em;
-    }
-
-    .bento-info p {
-      font-size: 0.78rem; color: var(--text-mid);
-      line-height: 1.45;
-    }
-
-    .bento-tag {
-      position: absolute; top: 14px; right: 14px;
-      padding: 4px 10px; border-radius: 6px;
-      background: rgba(6,6,11,0.7);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.06);
-      font-size: 0.68rem; font-weight: 600;
-      color: var(--accent); text-transform: uppercase;
-      letter-spacing: 0.5px;
-      opacity: 0; transform: translateY(-4px);
-      transition: all 0.3s;
-    }
-
-    .bento-card:hover .bento-tag { opacity: 1; transform: translateY(0); }
-
-    /* Bento layout — featured + grid */
-    .b-featured { grid-column: span 7; grid-row: span 2; }
-    .b-side     { grid-column: span 5; }
-    .b-third    { grid-column: span 4; }
-
-    @media (max-width: 900px) {
-      .bento { grid-template-columns: repeat(6, 1fr); }
-      .b-featured { grid-column: span 6; grid-row: span 1; }
-      .b-side     { grid-column: span 6; }
-      .b-third    { grid-column: span 3; }
-    }
-
-    @media (max-width: 600px) {
-      .bento { grid-template-columns: 1fr; grid-auto-rows: minmax(200px, auto); }
-      .b-featured, .b-side, .b-third { grid-column: span 1; grid-row: span 1; }
-    }
-
-    /* ── Lightbox ──────────────────────────────────────── */
-    .lightbox {
-      display: none; position: fixed; inset: 0; z-index: 1000;
-      flex-direction: column;
-      align-items: center; justify-content: center;
-      cursor: pointer; padding: 32px;
-      background: rgba(0,0,0,0.92);
-      backdrop-filter: blur(24px) saturate(180%);
-      animation: lbFadeIn 0.2s ease-out;
-    }
-
-    @keyframes lbFadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-    .lightbox.open { display: flex; }
-
-    .lightbox img {
-      max-width: 95%; max-height: 85vh;
-      border-radius: 14px;
-      box-shadow: 0 0 100px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
-      animation: lbScaleIn 0.25s ease-out;
-    }
-
-    @keyframes lbScaleIn {
-      from { opacity: 0; transform: scale(0.95); }
-      to { opacity: 1; transform: scale(1); }
-    }
-
-    .lightbox .lb-close {
-      position: absolute; top: 20px; right: 28px;
-      width: 40px; height: 40px; border-radius: 50%;
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.1);
-      display: flex; align-items: center; justify-content: center;
-      color: white; font-size: 1.4rem;
-      cursor: pointer; opacity: 0.7;
-      transition: all 0.2s;
-    }
-
-    .lightbox .lb-close:hover { opacity: 1; background: rgba(255,255,255,0.15); }
-
-    .lightbox .lb-hint {
-      margin-top: 16px;
-      color: rgba(255,255,255,0.3);
-      font-size: 0.8rem;
-    }
-
-    /* ── Feature grid ─────────────────────────────────── */
-    .features-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
-    }
+    /* ── Features grid ────────────────────────────────── */
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 
     .feature-card {
       background: var(--card); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 30px 26px;
-      transition: all 0.3s; position: relative; overflow: hidden;
+      border-radius: var(--radius); padding: 28px;
+      position: relative; overflow: hidden;
+      transition: all 0.3s; cursor: default;
     }
-
     .feature-card::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      content: ''; position: absolute; inset: 0; border-radius: var(--radius);
+      background: linear-gradient(135deg, rgba(79,195,247,0.05), transparent);
       opacity: 0; transition: opacity 0.3s;
     }
-
     .feature-card:hover {
-      border-color: rgba(79,195,247,0.25);
       transform: translateY(-4px);
       background: var(--card-hover);
     }
-
     .feature-card:hover::before { opacity: 1; }
 
     .feature-icon {
@@ -423,14 +200,81 @@
     }
 
     .tag-new { background: rgba(0,230,118,0.15); color: var(--accent3); }
+    .tag-v3 { background: rgba(255,152,0,0.15); color: #ffab40; }
     .tag-core { background: var(--accent-glow); color: var(--accent); }
+
+    /* ── 3D Showcase Cards ────────────────────────────── */
+    .showcase-3d-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+      perspective: 1200px;
+    }
+
+    .showcase-3d-grid .card-3d {
+      position: relative;
+      border-radius: var(--radius); overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      transition: transform 0.4s ease, box-shadow 0.4s ease;
+      transform-style: preserve-3d;
+    }
+
+    .card-3d:hover {
+      transform: rotateY(-5deg) rotateX(3deg) translateZ(20px);
+      box-shadow:
+        20px 20px 60px rgba(0,0,0,0.5),
+        0 0 40px rgba(79,195,247,0.08);
+    }
+
+    .card-3d img { width: 100%; display: block; transition: transform 0.4s; }
+    .card-3d:hover img { transform: scale(1.03); }
+
+    .card-3d .card-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 16px;
+      background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+    }
+
+    .card-3d .card-tag {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 6px;
+      background: rgba(79,195,247,0.2); color: var(--accent);
+    }
+
+    .card-3d h4 { font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+    .card-3d p { color: var(--text-mid); font-size: 0.78rem; line-height: 1.4; }
+
+    .card-3d.featured {
+      grid-column: span 2; grid-row: span 2;
+    }
+
+    .card-3d.featured:hover {
+      transform: rotateY(-3deg) rotateX(2deg) translateZ(30px);
+    }
+
+    /* ── Changelog ─────────────────────────────────────── */
+    .changelog { list-style: none; }
+    .changelog li {
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 0.9rem; color: var(--text-mid);
+    }
+    .changelog li:last-child { border: none; }
+    .cl-tag {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .cl-new { background: rgba(0,230,118,0.15); color: var(--accent3); }
+    .cl-fix { background: rgba(244,67,54,0.15); color: #ef5350; }
+    .cl-imp { background: rgba(79,195,247,0.15); color: var(--accent); }
 
     /* ── Shortcuts ─────────────────────────────────────── */
     .shortcuts-section {
       background: var(--surface);
       border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
     }
-
     .shortcuts-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
     .shortcut-group h4 {
       font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
@@ -438,9 +282,7 @@
       margin-bottom: 14px; padding-bottom: 10px;
       border-bottom: 1px solid var(--border);
     }
-
     .sc { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
-
     kbd {
       display: inline-block; min-width: 30px; text-align: center;
       padding: 3px 8px;
@@ -451,30 +293,26 @@
       font-size: 0.78rem; color: var(--text); font-weight: 500;
       box-shadow: 0 2px 0 rgba(0,0,0,0.3);
     }
-
     .sc-label { color: var(--text-mid); font-size: 0.84rem; }
 
     /* ── Requirements ──────────────────────────────────── */
     .req-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-
     .req-card {
       background: var(--card); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 28px; text-align: center;
       transition: border-color 0.2s;
     }
     .req-card:hover { border-color: var(--border-light); }
-
     .req-card .req-icon { font-size: 32px; margin-bottom: 12px; }
     .req-card h4 { font-size: 0.95rem; margin-bottom: 6px; font-weight: 600; }
     .req-card p { color: var(--text-dim); font-size: 0.82rem; }
 
-    /* ── CTA section ───────────────────────────────────── */
+    /* ── CTA ───────────────────────────────────────────── */
     .cta-section {
       text-align: center; padding: 80px 24px;
       background: linear-gradient(180deg, var(--surface), var(--bg));
       border-top: 1px solid var(--border);
     }
-
     .cta-section h2 { font-size: 2rem; font-weight: 800; margin-bottom: 12px; }
     .cta-section p { color: var(--text-mid); margin-bottom: 32px; font-size: 1.05rem; }
 
@@ -484,25 +322,38 @@
       color: var(--text-dim); font-size: 0.84rem;
       border-top: 1px solid var(--border);
     }
-
     footer .links { margin-top: 10px; }
     footer .links a { margin: 0 14px; color: var(--text-dim); }
     footer .links a:hover { color: var(--accent); }
 
+    /* ── Lightbox ──────────────────────────────────────── */
+    .lightbox {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.92); align-items: center; justify-content: center;
+      flex-direction: column; cursor: pointer;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-width: 92vw; max-height: 85vh; border-radius: 12px; cursor: default; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+    .lb-close { position: absolute; top: 24px; right: 32px; font-size: 2rem; color: white; cursor: pointer; }
+    .lb-hint { color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 16px; }
+
     /* ── Responsive ────────────────────────────────────── */
     @media (max-width: 900px) {
-      .features-grid, .shortcuts-columns, .req-grid, .showcase-grid { grid-template-columns: repeat(2, 1fr); }
+      .features-grid, .shortcuts-columns, .req-grid, .showcase-3d-grid { grid-template-columns: repeat(2, 1fr); }
+      .card-3d.featured { grid-column: span 2; grid-row: span 1; }
       .stats { gap: 32px; }
       nav .nav-links a:not(.nav-cta) { display: none; }
     }
 
     @media (max-width: 600px) {
       .hero { min-height: auto; padding: 100px 16px 40px; }
+      .hero h1 { font-size: 2.2rem; }
       .section { padding: 56px 16px; }
-      .features-grid, .shortcuts-columns, .req-grid, .showcase-grid { grid-template-columns: 1fr; }
+      .features-grid, .shortcuts-columns, .req-grid, .showcase-3d-grid { grid-template-columns: 1fr; }
+      .card-3d.featured { grid-column: span 1; }
       .hero-actions { flex-direction: column; align-items: center; }
       .btn { width: 100%; max-width: 300px; justify-content: center; }
-      .stats { gap: 20px; }
+      .stats { gap: 20px; flex-wrap: wrap; }
       .stat-value { font-size: 1.6rem; }
     }
   </style>
@@ -521,9 +372,10 @@
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#showcase">Screenshots</a>
+        <a href="#whats-new">What's New</a>
         <a href="#shortcuts">Shortcuts</a>
         <a href="https://github.com/santos-k/Dashcam-Video-Player" target="_blank">GitHub</a>
-        <a href="DashcamPlayer_Setup_v2.0.0.exe" class="nav-cta">&#8595; Download</a>
+        <a href="DashcamPlayer_Setup_v3.0.0.exe" class="nav-cta">&#8595; Download</a>
       </div>
     </div>
   </nav>
@@ -532,87 +384,106 @@
   <section class="hero">
     <div class="hero-badge">
       <span class="dot"></span>
-      v2.0.0 &mdash; Major Release
+      v3.0.0 &mdash; Universal Player + WiFi Dashcam
     </div>
 
     <h1>
       <span class="gradient">DashCam</span> Player<br>
-      Dual-Camera &amp; Wi-Fi Dashcam
+      Universal Video &amp; Wi-Fi Dashcam
     </h1>
 
     <p class="subtitle">
-      Play paired front &amp; back dashcam videos in sync. Connect to your dashcam over Wi-Fi. Customizable shortcuts, GPS map, thumbnail browser, and FFmpeg export.
+      Play any video format. Sync dual dashcam cameras. Connect to your dashcam over Wi-Fi. Zoom, volume control, smart clip grouping, and FFmpeg export &mdash; all in one app.
     </p>
 
     <div class="hero-actions">
-      <a href="DashcamPlayer_Setup_v2.0.0.exe" class="btn btn-primary">
+      <a href="DashcamPlayer_Setup_v3.0.0.exe" class="btn btn-primary">
         &#8595; Download for Windows
       </a>
       <a href="https://github.com/santos-k/Dashcam-Video-Player" class="btn btn-outline" target="_blank">
         &#9733; Source on GitHub
       </a>
     </div>
-    <p class="meta">Free &amp; open source &middot; Built with Flutter &middot; ~25 MB installer</p>
+    <p class="meta">Free &amp; open source &middot; Built with Flutter &middot; 19+ video formats &middot; ~25 MB</p>
 
     <div class="showcase-hero">
       <img src="assets/screenshots/side_by_side.png"
            alt="DashCam Player - Dual camera side by side view"
            onclick="openLightbox(this.src)">
-      <p class="caption">Side-by-side view &mdash; Front and back cameras playing in perfect sync</p>
+      <p class="caption">Side-by-side view &mdash; Front and back cameras playing in perfect sync with zoom and volume controls</p>
     </div>
   </section>
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat"><div class="stat-value">3</div><div class="stat-label">Layout Modes</div></div>
-    <div class="stat"><div class="stat-value">30+</div><div class="stat-label">Customizable Shortcuts</div></div>
-    <div class="stat"><div class="stat-value">11</div><div class="stat-label">Speed Levels</div></div>
-    <div class="stat"><div class="stat-value">Wi-Fi</div><div class="stat-label">Dashcam Connection</div></div>
-    <div class="stat"><div class="stat-value">&plusmn;5s</div><div class="stat-label">Sync Offset Range</div></div>
+    <div class="stat"><div class="stat-value">5</div><div class="stat-label">Layout Modes</div></div>
+    <div class="stat"><div class="stat-value">19+</div><div class="stat-label">Video Formats</div></div>
+    <div class="stat"><div class="stat-value">35+</div><div class="stat-label">Shortcuts</div></div>
+    <div class="stat"><div class="stat-value">8x</div><div class="stat-label">Max Zoom</div></div>
+    <div class="stat"><div class="stat-value">Wi-Fi</div><div class="stat-label">Dashcam API</div></div>
+    <div class="stat"><div class="stat-value">6</div><div class="stat-label">Sort Modes</div></div>
   </div>
 
   <!-- Features -->
   <section class="section" id="features">
     <p class="section-label">Features</p>
-    <h2 class="section-title">Everything for Dashcam Review</h2>
-    <p class="section-subtitle">From quick review to professional export &mdash; all in one lightweight desktop app</p>
+    <h2 class="section-title">Everything for Video Review</h2>
+    <p class="section-subtitle">From dashcam footage to any video &mdash; powerful playback in a lightweight desktop app</p>
 
     <div class="features-grid">
       <div class="feature-card">
-        <span class="feature-tag tag-new">New in v2.0</span>
+        <span class="feature-tag tag-v3">New in v3.0</span>
         <div class="feature-icon fi-green">&#128225;</div>
-        <h3>Wi-Fi Dashcam Connection</h3>
-        <p>Connect to your dashcam over Wi-Fi. Auto-discovers the device IP, browse &amp; download files remotely, RTSP live stream, camera controls, and device settings.</p>
+        <h3>Wi-Fi Dashcam (Full API)</h3>
+        <p>Connect to Onelap dashcam over Wi-Fi. Full REST API: browse files, delete, download, settings, snapshot, recording control. Auto-loads clips into main player.</p>
       </div>
       <div class="feature-card">
-        <span class="feature-tag tag-new">New in v2.0</span>
-        <div class="feature-icon fi-green">&#127912;</div>
-        <h3>Thumbnail Clip Browser</h3>
-        <p>Browse clips with video thumbnails in grid or list view. Multi-select with batch delete, auto-scroll to current clip, and instant view switching.</p>
+        <span class="feature-tag tag-v3">New in v3.0</span>
+        <div class="feature-icon fi-green">&#128269;</div>
+        <h3>Zoom In/Out (up to 8x)</h3>
+        <p>Pinch/scroll zoom on each video pane independently. Keyboard shortcuts <kbd>=</kbd> <kbd>-</kbd> <kbd>0</kbd>. Zoom indicator badge. Reset with one click.</p>
       </div>
       <div class="feature-card">
-        <span class="feature-tag tag-new">New in v2.0</span>
-        <div class="feature-icon fi-green">&#9000;</div>
-        <h3>Customizable Shortcuts</h3>
-        <p>30+ keyboard shortcuts, all remappable. Visual editor with conflict detection. Bindings persist across sessions. Every tooltip updates dynamically.</p>
+        <span class="feature-tag tag-v3">New in v3.0</span>
+        <div class="feature-icon fi-green">&#128266;</div>
+        <h3>Volume Sliders</h3>
+        <p>Per-camera volume control with vertical slider popup on hover. Click to mute/unmute, drag for fine control. Separate F/B sliders for paired clips.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-tag tag-v3">New in v3.0</span>
+        <div class="feature-icon fi-green">&#128194;</div>
+        <h3>Smart Clip Grouping</h3>
+        <p>Group clips by date, type (Paired/Video/F-only/B-only), or source (Local/WiFi). Collapsible groups with select-all per group. Works in both list and grid view.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-tag tag-v3">New in v3.0</span>
+        <div class="feature-icon fi-green">&#127916;</div>
+        <h3>Universal Video Player</h3>
+        <p>Play 19+ formats: MP4, MKV, AVI, TS, WebM, FLV, WMV, M4V, 3GP, MTS, VOB, and more. Recursive folder scanning picks up all videos.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-tag tag-v3">New in v3.0</span>
+        <div class="feature-icon fi-green">&#128247;</div>
+        <h3>5 Layout Modes</h3>
+        <p>Side-by-side, Stacked, PIP, Front Only, Back Only. Switch with <kbd>1</kbd>&ndash;<kbd>5</kbd> keys. Front/Back Only for focused single-camera review.</p>
       </div>
       <div class="feature-card">
         <span class="feature-tag tag-core">Core</span>
         <div class="feature-icon fi-blue">&#128247;</div>
         <h3>Dual Camera Sync</h3>
-        <p>Auto-pairs front &amp; back camera files by timestamp with &plusmn;5s tolerance. Supports video_front/video_back folders and F/B filename suffixes.</p>
+        <p>Auto-pairs front &amp; back camera files by timestamp with &plusmn;5s tolerance. Supports dashcam folders, F/B suffixes, and nested directories.</p>
       </div>
       <div class="feature-card">
         <span class="feature-tag tag-core">Core</span>
-        <div class="feature-icon fi-blue">&#127916;</div>
-        <h3>3 Layout Modes</h3>
-        <p>Side-by-side, Stacked, and Picture-in-Picture. PIP is fully draggable and resizable with proportional repositioning when controls toggle.</p>
+        <div class="feature-icon fi-blue">&#127912;</div>
+        <h3>Thumbnail Clip Browser</h3>
+        <p>Browse clips with thumbnails in grid or list view. Multi-select, batch delete, clip durations, WiFi badge, 6 sort modes, and collapsible group headers.</p>
       </div>
       <div class="feature-card">
         <span class="feature-tag tag-core">Core</span>
-        <div class="feature-icon fi-blue">&#9201;</div>
-        <h3>Variable Speed (0.1x&ndash;5x)</h3>
-        <p>11 speed levels from 0.1x slow-motion to 5x fast-forward. Speed persists across clip changes. Perfect for timelapse review.</p>
+        <div class="feature-icon fi-blue">&#9000;</div>
+        <h3>35+ Customizable Shortcuts</h3>
+        <p>Every action has a keyboard shortcut, all remappable via built-in editor. Zoom, volume, layout, WiFi panel &mdash; everything at your fingertips.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon fi-purple">&#127758;</div>
@@ -622,87 +493,104 @@
       <div class="feature-card">
         <div class="feature-icon fi-purple">&#128190;</div>
         <h3>FFmpeg Export</h3>
-        <p>Export composed videos in any layout with H.264 encoding. Sync offset applied automatically. Real-time progress tracking.</p>
+        <p>Export composed videos in any layout with H.264 encoding. Supports all 5 layouts including Front Only and Back Only. HTTP URL export for WiFi clips.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon fi-purple">&#128736;</div>
-        <h3>Smart Auto-Hide UI</h3>
-        <p>Controls disappear after 5s during playback. Video fills the entire screen. Move the mouse or tap to bring them back.</p>
+        <div class="feature-icon fi-purple">&#128276;</div>
+        <h3>Modern Notifications</h3>
+        <p>Top-right slide-in notifications with auto-dismiss. Green for success, red for errors, amber for warnings. Clean pill design with close button.</p>
       </div>
     </div>
   </section>
 
-  <!-- Showcase -->
+  <!-- 3D Showcase -->
   <section class="section" id="showcase" style="padding-top: 0;">
     <p class="section-label">Showcase</p>
     <h2 class="section-title">See It in Action</h2>
-    <p class="section-subtitle">Click any screenshot to expand. Built with real dashcam footage.</p>
+    <p class="section-subtitle">Hover for 3D effect. Click to expand.</p>
 
-    <div class="bento">
-      <!-- Featured: Side by Side (large) -->
-      <div class="bento-card b-featured" onclick="openLightbox('assets/screenshots/side_by_side.png')">
+    <div class="showcase-3d-grid">
+      <div class="card-3d featured" onclick="openLightbox('assets/screenshots/side_by_side.png')">
         <img src="assets/screenshots/side_by_side.png" alt="Side by side dual camera view" loading="lazy">
-        <span class="bento-tag">Featured</span>
-        <div class="bento-info">
-          <div class="bento-num">1</div>
+        <div class="card-overlay">
+          <span class="card-tag">Featured</span>
           <h4>Side-by-Side View</h4>
-          <p>Front and back cameras synchronized frame-by-frame with independent audio control and real-time seek</p>
+          <p>Dual cameras synced with zoom, volume sliders, and per-camera control</p>
         </div>
       </div>
 
-      <!-- Side: Stacked -->
-      <div class="bento-card b-side" onclick="openLightbox('assets/screenshots/stacked.png')">
+      <div class="card-3d" onclick="openLightbox('assets/screenshots/stacked.png')">
         <img src="assets/screenshots/stacked.png" alt="Stacked layout" loading="lazy">
-        <span class="bento-tag">Layout</span>
-        <div class="bento-info">
-          <div class="bento-num">2</div>
+        <div class="card-overlay">
+          <span class="card-tag">Layout</span>
           <h4>Stacked Layout</h4>
-          <p>Front on top, back below &mdash; ideal for ultrawide monitors</p>
+          <p>Front on top, back below</p>
         </div>
       </div>
 
-      <!-- Side: PIP -->
-      <div class="bento-card b-side" onclick="openLightbox('assets/screenshots/pip.png')">
+      <div class="card-3d" onclick="openLightbox('assets/screenshots/pip.png')">
         <img src="assets/screenshots/pip.png" alt="Picture-in-Picture" loading="lazy">
-        <span class="bento-tag">Layout</span>
-        <div class="bento-info">
-          <div class="bento-num">3</div>
+        <div class="card-overlay">
+          <span class="card-tag">Layout</span>
           <h4>Picture-in-Picture</h4>
-          <p>Draggable, resizable overlay. Press 3 to swap primary camera</p>
+          <p>Draggable, resizable PIP overlay</p>
         </div>
       </div>
 
-      <!-- Third row: 3 equal cards -->
-      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/clips.png')">
+      <div class="card-3d" onclick="openLightbox('assets/screenshots/clips.png')">
         <img src="assets/screenshots/clips.png" alt="Clip browser with thumbnails" loading="lazy">
-        <span class="bento-tag">Browser</span>
-        <div class="bento-info">
-          <div class="bento-num">4</div>
+        <div class="card-overlay">
+          <span class="card-tag">Browser</span>
           <h4>Clip Browser</h4>
-          <p>Thumbnails, multi-select, batch delete &amp; instant navigation</p>
+          <p>Grouped, sortable, with durations and WiFi badges</p>
         </div>
       </div>
 
-      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/map.png')">
+      <div class="card-3d" onclick="openLightbox('assets/screenshots/map.png')">
         <img src="assets/screenshots/map.png" alt="GPS Map" loading="lazy">
-        <span class="bento-tag">GPS</span>
-        <div class="bento-info">
-          <div class="bento-num">5</div>
+        <div class="card-overlay">
+          <span class="card-tag">GPS</span>
           <h4>GPS Map</h4>
-          <p>Interactive OpenStreetMap with tile layers &amp; coordinate search</p>
+          <p>Interactive map with tile layers</p>
         </div>
       </div>
 
-      <div class="bento-card b-third" onclick="openLightbox('assets/screenshots/landing.png')">
+      <div class="card-3d" onclick="openLightbox('assets/screenshots/landing.png')">
         <img src="assets/screenshots/landing.png" alt="Welcome screen" loading="lazy">
-        <span class="bento-tag">Start</span>
-        <div class="bento-info">
-          <div class="bento-num">6</div>
+        <div class="card-overlay">
+          <span class="card-tag">Start</span>
           <h4>Welcome Screen</h4>
-          <p>Full shortcut reference with one-click folder open</p>
+          <p>Full shortcut reference</p>
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- What's New -->
+  <section class="section" id="whats-new">
+    <p class="section-label">Changelog</p>
+    <h2 class="section-title">What's New in v3.0</h2>
+    <p class="section-subtitle">17 commits of new features, bug fixes, and improvements</p>
+
+    <ul class="changelog">
+      <li><span class="cl-tag cl-new">New</span> Wi-Fi dashcam: full Onelap REST API with 16 endpoints (files, settings, delete, snapshot, recording)</li>
+      <li><span class="cl-tag cl-new">New</span> Universal video player: 19+ formats (MP4, MKV, AVI, TS, WebM, FLV, WMV, M4V, 3GP, MTS, VOB...)</li>
+      <li><span class="cl-tag cl-new">New</span> Recursive folder scanning: finds videos in all subdirectories automatically</li>
+      <li><span class="cl-tag cl-new">New</span> Zoom in/out up to 8x with pinch/scroll, keyboard shortcuts (<kbd>=</kbd> <kbd>-</kbd> <kbd>0</kbd>), and reset button</li>
+      <li><span class="cl-tag cl-new">New</span> Per-camera volume sliders with vertical popup on hover, independent F/B control</li>
+      <li><span class="cl-tag cl-new">New</span> 5 layout modes: Side-by-side, Stacked, PIP, Front Only, Back Only (<kbd>1</kbd>&ndash;<kbd>5</kbd>)</li>
+      <li><span class="cl-tag cl-new">New</span> Smart clip grouping: by date, type, or source with collapsible sections and group select-all</li>
+      <li><span class="cl-tag cl-new">New</span> 6 sort modes: Date, Name, Duration &mdash; ascending and descending</li>
+      <li><span class="cl-tag cl-new">New</span> Clip durations probed via ffprobe and displayed in both list and grid views</li>
+      <li><span class="cl-tag cl-new">New</span> WiFi clips auto-load into main clip list with front/back pairing</li>
+      <li><span class="cl-tag cl-new">New</span> Side-by-side RTSP live view with front/back camera labels</li>
+      <li><span class="cl-tag cl-new">New</span> <kbd>N</kbd> shortcut to toggle Wi-Fi dashcam panel</li>
+      <li><span class="cl-tag cl-new">New</span> Modern pill-style notifications (green/red/amber) replacing snackbars</li>
+      <li><span class="cl-tag cl-imp">Improved</span> Controls toggle on click (no auto-hide timer), always visible by default</li>
+      <li><span class="cl-tag cl-imp">Improved</span> WiFi file delete via /app/deletefile API (was faking success before)</li>
+      <li><span class="cl-tag cl-fix">Fixed</span> Delete removing wrong clips when sorted newest-first</li>
+      <li><span class="cl-tag cl-fix">Fixed</span> Controls not reappearing after video loads</li>
+    </ul>
   </section>
 
   <!-- Shortcuts -->
@@ -710,7 +598,7 @@
     <div class="section">
       <p class="section-label">Shortcuts</p>
       <h2 class="section-title">Keyboard-First Workflow</h2>
-      <p class="section-subtitle">All 30+ shortcuts are customizable via the built-in editor</p>
+      <p class="section-subtitle">All 35+ shortcuts are customizable via the built-in editor</p>
 
       <div class="shortcuts-columns">
         <div class="shortcut-group">
@@ -721,9 +609,12 @@
           <div class="sc"><kbd>Shift+,</kbd> <span class="sc-label">Previous clip</span></div>
           <div class="sc"><kbd>[</kbd> <kbd>]</kbd> <span class="sc-label">Speed down / up</span></div>
           <div class="sc"><kbd>\</kbd> <span class="sc-label">Reset speed to 1x</span></div>
-          <h4 style="margin-top: 18px;">Audio</h4>
-          <div class="sc"><kbd>F</kbd> <span class="sc-label">Mute front camera</span></div>
-          <div class="sc"><kbd>B</kbd> <span class="sc-label">Mute back camera</span></div>
+          <h4 style="margin-top: 18px;">Zoom &amp; Audio</h4>
+          <div class="sc"><kbd>=</kbd> <span class="sc-label">Zoom in</span></div>
+          <div class="sc"><kbd>-</kbd> <span class="sc-label">Zoom out</span></div>
+          <div class="sc"><kbd>0</kbd> <span class="sc-label">Reset zoom</span></div>
+          <div class="sc"><kbd>F</kbd> <span class="sc-label">Mute/unmute front</span></div>
+          <div class="sc"><kbd>B</kbd> <span class="sc-label">Mute/unmute back</span></div>
         </div>
 
         <div class="shortcut-group">
@@ -731,29 +622,32 @@
           <div class="sc"><kbd>1</kbd> <span class="sc-label">Side by side</span></div>
           <div class="sc"><kbd>2</kbd> <span class="sc-label">Stacked</span></div>
           <div class="sc"><kbd>3</kbd> <span class="sc-label">PIP (toggle primary)</span></div>
+          <div class="sc"><kbd>4</kbd> <span class="sc-label">Front only</span></div>
+          <div class="sc"><kbd>5</kbd> <span class="sc-label">Back only</span></div>
           <div class="sc"><kbd>L</kbd> <span class="sc-label">Layout popup</span></div>
           <div class="sc"><kbd>Shift</kbd> <span class="sc-label">Toggle fullscreen</span></div>
           <h4 style="margin-top: 18px;">Panels</h4>
           <div class="sc"><kbd>C</kbd> <span class="sc-label">Clip list</span></div>
           <div class="sc"><kbd>T</kbd> <span class="sc-label">List / Thumbnails</span></div>
-          <div class="sc"><kbd>X</kbd> <span class="sc-label">Select mode</span></div>
-          <div class="sc"><kbd>A</kbd> <span class="sc-label">Select all</span></div>
+          <div class="sc"><kbd>N</kbd> <span class="sc-label">Wi-Fi dashcam</span></div>
           <div class="sc"><kbd>M</kbd> <span class="sc-label">Map sidebar</span></div>
-          <div class="sc"><kbd>/</kbd> <span class="sc-label">Shortcut editor</span></div>
         </div>
 
         <div class="shortcut-group">
           <h4>File Operations</h4>
-          <div class="sc"><kbd>O</kbd> <span class="sc-label">Open dashcam folder</span></div>
-          <div class="sc"><kbd>S</kbd> <span class="sc-label">Save clips to folder</span></div>
+          <div class="sc"><kbd>O</kbd> <span class="sc-label">Open folder</span></div>
+          <div class="sc"><kbd>S</kbd> <span class="sc-label">Save clips</span></div>
           <div class="sc"><kbd>D</kbd> <span class="sc-label">Delete clips</span></div>
-          <div class="sc"><kbd>E</kbd> <span class="sc-label">Export composed video</span></div>
-          <div class="sc"><kbd>W</kbd> <span class="sc-label">Close current folder</span></div>
-          <div class="sc"><kbd>R</kbd> <span class="sc-label">Toggle sort order</span></div>
+          <div class="sc"><kbd>E</kbd> <span class="sc-label">Export video</span></div>
+          <div class="sc"><kbd>W</kbd> <span class="sc-label">Close folder</span></div>
+          <div class="sc"><kbd>R</kbd> <span class="sc-label">Cycle sort mode</span></div>
+          <h4 style="margin-top: 18px;">Selection</h4>
+          <div class="sc"><kbd>X</kbd> <span class="sc-label">Select mode</span></div>
+          <div class="sc"><kbd>A</kbd> <span class="sc-label">Select all</span></div>
           <h4 style="margin-top: 18px;">Application</h4>
           <div class="sc"><kbd>I</kbd> <span class="sc-label">About panel</span></div>
-          <div class="sc"><kbd>Q</kbd> <span class="sc-label">Quit application</span></div>
-          <div class="sc"><kbd>Esc</kbd> <span class="sc-label">Close overlay</span></div>
+          <div class="sc"><kbd>/</kbd> <span class="sc-label">Shortcut editor</span></div>
+          <div class="sc"><kbd>Q</kbd> <span class="sc-label">Quit</span></div>
         </div>
       </div>
     </div>
@@ -763,7 +657,7 @@
   <section class="section">
     <p class="section-label">Setup</p>
     <h2 class="section-title">Getting Started</h2>
-    <p class="section-subtitle">Download, plug in your dashcam SD card, and go</p>
+    <p class="section-subtitle">Download, open any video folder, and go</p>
 
     <div class="req-grid">
       <div class="req-card">
@@ -773,30 +667,30 @@
       </div>
       <div class="req-card">
         <div class="req-icon">&#128193;</div>
-        <h4>Dashcam Folder</h4>
-        <p>video_front &amp; video_back structure, or F/B suffixed filenames</p>
+        <h4>Any Video Folder</h4>
+        <p>Dashcam structure auto-detected. Or open any folder with videos.</p>
       </div>
       <div class="req-card">
         <div class="req-icon">&#127916;</div>
         <h4>FFmpeg (optional)</h4>
-        <p>Only needed for video export &amp; thumbnails. <a href="https://ffmpeg.org/download.html">Download</a></p>
+        <p>For export, thumbnails &amp; duration probing. <a href="https://ffmpeg.org/download.html">Download</a></p>
       </div>
     </div>
   </section>
 
   <!-- CTA -->
   <section class="cta-section">
-    <h2>Ready to review your dashcam footage?</h2>
-    <p>Download DashCam Player for free and start reviewing in seconds.</p>
+    <h2>Ready to review your footage?</h2>
+    <p>Download DashCam Player for free. Play any video, connect your dashcam, export with one click.</p>
     <div class="hero-actions">
-      <a href="DashcamPlayer_Setup_v2.0.0.exe" class="btn btn-primary">&#8595; Download v2.0.0</a>
+      <a href="DashcamPlayer_Setup_v3.0.0.exe" class="btn btn-primary">&#8595; Download v3.0.0</a>
       <a href="https://github.com/santos-k/Dashcam-Video-Player" class="btn btn-outline" target="_blank">View Source</a>
     </div>
   </section>
 
   <!-- Footer -->
   <footer>
-    <p>DashCam Player v2.0.0 &middot; Built with Flutter, media_kit &amp; Riverpod</p>
+    <p>DashCam Player v3.0.0 &middot; Built with Flutter, media_kit &amp; Riverpod</p>
     <div class="links">
       <a href="https://github.com/santos-k/Dashcam-Video-Player" target="_blank">GitHub</a>
       <a href="https://github.com/santos-k/Dashcam-Video-Player/releases" target="_blank">Releases</a>
@@ -822,7 +716,6 @@
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') closeLightbox();
     });
-    // Smooth scroll for nav links
     document.querySelectorAll('a[href^="#"]').forEach(a => {
       a.addEventListener('click', e => {
         e.preventDefault();
