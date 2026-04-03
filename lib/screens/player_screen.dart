@@ -884,18 +884,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           _mapSidebarOpen = open;
           if (!open) _focusNode.requestFocus();
         },
-        drawer: ClipListDrawer(
+        drawer: pairs.isNotEmpty ? ClipListDrawer(
           onSelect: (i) {
             _goTo(i, autoPlay: true);
           },
           onSave:   _saveFromDrawer,
           onDelete:  _deleteFromDrawer,
-        ),
-        endDrawer: MapSidebar(
+        ) : null,
+        endDrawer: pairs.isNotEmpty ? MapSidebar(
           videoPath: mapVideoPath,
           onClose: () => _focusNode.requestFocus(),
-        ),
-        body: MouseRegion(
+        ) : null,
+        body: pairs.isEmpty
+          ? _buildLandingBody()
+          : MouseRegion(
           onHover: (_) => _resetHideTimer(),
           child: Column(children: [
           // Top bar — collapses when hidden so video fills space
@@ -927,7 +929,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               },
               child: Stack(children: [
                 DualVideoView(key: _videoViewKey),
-                if (pairs.isEmpty) _EmptyState(onOpen: _pickFolder),
                 // About overlay — rendered in-widget so I key toggle works
                 if (_aboutOpen)
                   GestureDetector(
@@ -985,6 +986,413 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ),
         ]),
         ),
+      ),
+    );
+  }
+
+  // ─── Landing page (no clips loaded) ─────────────────────────────────────────
+
+  Widget _buildLandingBody() {
+    return Row(
+      children: [
+        // ─── Left Sidebar ───
+        Container(
+          width: 200,
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1117),
+            border: Border(right: BorderSide(color: Color(0xFF1E2630))),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // App branding
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4FC3F7).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.videocam_rounded,
+                        color: Color(0xFF4FC3F7), size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('DashCam Player',
+                      style: TextStyle(color: Colors.white, fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+              // Navigation items
+              _landingNavItem(Icons.folder_rounded, 'Library', true, _pickFolder),
+              _landingNavItem(Icons.access_time_rounded, 'Recent Videos', false, null),
+              _landingNavItem(Icons.location_on_outlined, 'Map View', false, null),
+              _landingNavItem(Icons.settings_outlined, 'Settings', false, _showShortcutSettings),
+              const Spacer(),
+            ],
+          ),
+        ),
+
+        // ─── Main Content ───
+        Expanded(
+          child: Column(children: [
+            // Top bar with action icons
+            Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.search_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: () {},
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.help_outline_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: _showAbout,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.notifications_none_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: () {},
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined,
+                        color: Colors.white38, size: 20),
+                    onPressed: _showShortcutSettings,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Hero area
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF0A1628),
+                      Color(0xFF0F1D32),
+                      Color(0xFF0A1628),
+                      Color(0xFF060C16),
+                    ],
+                  ),
+                ),
+                child: Stack(children: [
+                  // Subtle atmosphere lines
+                  Positioned.fill(
+                    child: CustomPaint(painter: _RoadAtmospherePainter()),
+                  ),
+                  // Center content
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Layout mode toggle (Front | Split | Rear)
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: Colors.black26,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _landingLayoutTab(Icons.videocam_outlined, 'Front', false),
+                              _landingLayoutTab(Icons.view_column_outlined, 'Split', true),
+                              _landingLayoutTab(Icons.videocam_outlined, 'Rear', false),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 48),
+                        // Download icon in bordered box
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: const Color(0xFF4FC3F7).withValues(alpha: 0.3),
+                              width: 1.5,
+                            ),
+                            color: const Color(0xFF4FC3F7).withValues(alpha: 0.06),
+                          ),
+                          child: const Icon(Icons.download_rounded,
+                              color: Color(0xFF4FC3F7), size: 32),
+                        ),
+                        const SizedBox(height: 28),
+                        // Open Dashcam Folder button
+                        ElevatedButton.icon(
+                          onPressed: _pickFolder,
+                          icon: const Icon(Icons.add_rounded, size: 20),
+                          label: const Text('Open Dashcam Folder',
+                              style: TextStyle(fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4FC3F7),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 32, vertical: 16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            elevation: 8,
+                            shadowColor:
+                                const Color(0xFF4FC3F7).withValues(alpha: 0.3),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text('or Drag & Drop videos here',
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.35),
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+
+            // Quick action cards — row 1
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              child: Row(children: [
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.history_rounded,
+                  const Color(0xFF4FC3F7),
+                  'Resume Last Session',
+                  'Start where you left off',
+                  _pickFolder,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.folder_open_rounded,
+                  const Color(0xFF26A69A),
+                  'Open Recent Folder',
+                  'Browse dashcam folders',
+                  _pickFolder,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.movie_creation_outlined,
+                  const Color(0xFF5C6BC0),
+                  'Export Last Clip',
+                  'MP4 video export',
+                  null,
+                )),
+              ]),
+            ),
+            // Quick action cards — row 2
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Row(children: [
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.wifi_rounded,
+                  const Color(0xFF42A5F5),
+                  'Connect Wi-Fi Dashcam',
+                  'Download from camera',
+                  () => setState(() => _dashcamOpen = !_dashcamOpen),
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.route_rounded,
+                  const Color(0xFFEF5350),
+                  'View GPS Route',
+                  'Map & location data',
+                  null,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.keyboard_rounded,
+                  const Color(0xFFAB47BC),
+                  'Keyboard Shortcuts',
+                  'View all shortcuts',
+                  _showShortcutSettings,
+                )),
+              ]),
+            ),
+
+            // Bottom controls bar (disabled placeholder)
+            Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0A0A0A),
+                border: Border(top: BorderSide(color: Color(0xFF1A1A1A))),
+              ),
+              child: Row(children: [
+                const Icon(Icons.replay_10_rounded,
+                    color: Colors.white12, size: 20),
+                const SizedBox(width: 12),
+                Icon(Icons.play_arrow_rounded,
+                    color: Colors.white.withValues(alpha: 0.16), size: 28),
+                const SizedBox(width: 12),
+                const Icon(Icons.forward_10_rounded,
+                    color: Colors.white12, size: 20),
+                const SizedBox(width: 16),
+                const Icon(Icons.volume_up_rounded,
+                    color: Colors.white12, size: 18),
+                const SizedBox(width: 16),
+                // Progress bar
+                Expanded(
+                  child: Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text('00:00',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        fontSize: 12,
+                        fontFamily: 'monospace')),
+                const SizedBox(width: 12),
+                Text('00:00',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        fontSize: 12,
+                        fontFamily: 'monospace')),
+              ]),
+            ),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _landingNavItem(
+      IconData icon, String label, bool selected, VoidCallback? onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF4FC3F7).withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(icon,
+                color: selected
+                    ? const Color(0xFF4FC3F7)
+                    : Colors.white38,
+                size: 18),
+            const SizedBox(width: 12),
+            Text(label,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _landingActionCard(IconData icon, Color color, String title,
+      String subtitle, VoidCallback? onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Opacity(
+          opacity: onTap != null ? 1.0 : 0.5,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111820),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF1E2630)),
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.35),
+                          fontSize: 11)),
+                ],
+              )),
+              Icon(Icons.chevron_right_rounded,
+                  color: Colors.white.withValues(alpha: 0.2), size: 18),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _landingLayoutTab(IconData icon, String label, bool selected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? const Color(0xFF4FC3F7) : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon,
+              size: 14,
+              color: selected ? Colors.black : Colors.white38),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                color: selected ? Colors.black : Colors.white38,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              )),
+        ],
       ),
     );
   }
@@ -1254,171 +1662,33 @@ class _ConfirmDialog extends StatelessWidget {
 
 // ─── Landing page (empty state) ─────────────────────────────────────────────
 
-class _EmptyState extends ConsumerWidget {
-  final VoidCallback onOpen;
-  const _EmptyState({required this.onOpen});
-
+class _RoadAtmospherePainter extends CustomPainter {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sc = ref.watch(shortcutConfigProvider);
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..strokeWidth = 1;
 
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // App branding
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4FC3F7).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.videocam_rounded,
-                color: Color(0xFF4FC3F7), size: 52),
-          ),
-          const SizedBox(height: 18),
-          const Text('DashCam Player',
-              style: TextStyle(color: Colors.white, fontSize: 22,
-                  fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-          const SizedBox(height: 6),
-          const Text('Dual-camera dashcam video player & exporter',
-              style: TextStyle(color: Colors.white38, fontSize: 13)),
-          const SizedBox(height: 28),
+    // Converging perspective lines (road vanishing point effect)
+    final cx = size.width / 2;
+    final vanishY = size.height * 0.35;
 
-          // Open button
-          ElevatedButton.icon(
-            onPressed: onOpen,
-            icon: const Icon(Icons.folder_open_rounded, size: 20),
-            label: const Text('Open Dashcam Folder',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF4FC3F7),
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text('Supports video_front / video_back folder structure',
-              style: TextStyle(color: Colors.white24, fontSize: 11)),
+    paint.color = const Color(0x06FFFFFF);
+    for (var i = 1; i <= 6; i++) {
+      final spread = i * size.width * 0.12;
+      final y = vanishY + i * size.height * 0.08;
+      canvas.drawLine(Offset(cx - spread, y), Offset(cx + spread, y), paint);
+    }
 
-          const SizedBox(height: 32),
-
-          // Shortcuts in multi-column grid
-          Container(
-            constraints: const BoxConstraints(maxWidth: 640),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-            ),
-            child: Column(children: [
-              const Text('KEYBOARD SHORTCUTS',
-                  style: TextStyle(color: Colors.white24, fontSize: 10,
-                      fontWeight: FontWeight.w600, letterSpacing: 1.5)),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Column 1: Playback
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('Playback'),
-                      _kb(sc.label(ShortcutAction.playPause), 'Play / Pause'),
-                      _kb('${sc.label(ShortcutAction.seekBackward)} ${sc.label(ShortcutAction.seekForward)}', 'Seek \u00b110s'),
-                      _kb(sc.label(ShortcutAction.nextClip), 'Next clip'),
-                      _kb(sc.label(ShortcutAction.previousClip), 'Previous clip'),
-                      _kb('${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)}', 'Speed down / up'),
-                      _kb(sc.label(ShortcutAction.speedReset), 'Reset speed 1x'),
-                      _kb(sc.label(ShortcutAction.zoomIn), 'Zoom in'),
-                      _kb(sc.label(ShortcutAction.zoomOut), 'Zoom out'),
-                      _kb(sc.label(ShortcutAction.zoomReset), 'Reset zoom'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('Audio'),
-                      _kb(sc.label(ShortcutAction.muteFront), 'Mute front'),
-                      _kb(sc.label(ShortcutAction.muteBack), 'Mute back'),
-                    ],
-                  )),
-                  const SizedBox(width: 16),
-                  // Column 2: View & Layout
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('Layout'),
-                      _kb(sc.label(ShortcutAction.layoutSideBySide), 'Side by side'),
-                      _kb(sc.label(ShortcutAction.layoutStacked), 'Stacked'),
-                      _kb(sc.label(ShortcutAction.layoutPip), 'PIP (toggle primary)'),
-                      _kb(sc.label(ShortcutAction.layoutPopup), 'Layout popup'),
-                      _kb(sc.label(ShortcutAction.fullscreen), 'Fullscreen'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('Panels'),
-                      _kb(sc.label(ShortcutAction.clipList), 'Clip list'),
-                      _kb(sc.label(ShortcutAction.thumbnailToggle), 'List / Thumbnails'),
-                      _kb(sc.label(ShortcutAction.selectMode), 'Select mode'),
-                      _kb(sc.label(ShortcutAction.selectAll), 'Select all'),
-                      _kb(sc.label(ShortcutAction.mapSidebar), 'Map sidebar'),
-                      _kb(sc.label(ShortcutAction.wifiDashcam), 'Wi-Fi dashcam'),
-                      _kb(sc.label(ShortcutAction.about), 'About'),
-                    ],
-                  )),
-                  const SizedBox(width: 16),
-                  // Column 3: File operations
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('File'),
-                      _kb(sc.label(ShortcutAction.openFolder), 'Open folder'),
-                      _kb(sc.label(ShortcutAction.saveClips), 'Save clips'),
-                      _kb(sc.label(ShortcutAction.deleteClips), 'Delete clips'),
-                      _kb(sc.label(ShortcutAction.exportVideo), 'Export video'),
-                      _kb(sc.label(ShortcutAction.closeFolder), 'Close folder'),
-                      _kb(sc.label(ShortcutAction.toggleSort), 'Toggle sort'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('App'),
-                      _kb(sc.label(ShortcutAction.quit), 'Quit'),
-                      _kb(sc.label(ShortcutAction.shortcutSettings), 'Shortcuts'),
-                      _kb('Esc', 'Close overlay'),
-                    ],
-                  )),
-                ],
-              ),
-            ]),
-          ),
-        ]),
-      ),
-    );
+    // Center dashed line (road markings)
+    paint.color = const Color(0x0AFFFFFF);
+    for (var i = 0; i < 8; i++) {
+      final y = vanishY + 20 + i * 22.0;
+      final halfW = 4.0 + i * 3.0;
+      canvas.drawLine(Offset(cx - halfW, y), Offset(cx + halfW, y), paint);
+    }
   }
 
-  static Widget _sectionLabel(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(text,
-        style: const TextStyle(color: Colors.white30, fontSize: 10,
-            fontWeight: FontWeight.w600, letterSpacing: 0.8)),
-  );
-
-  static Widget _kb(String key, String label) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(children: [
-      Container(
-        constraints: const BoxConstraints(minWidth: 42),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Text(key, textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 10,
-                fontFamily: 'monospace')),
-      ),
-      const SizedBox(width: 8),
-      Expanded(child: Text(label,
-          style: const TextStyle(color: Colors.white30, fontSize: 11))),
-    ]),
-  );
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ─── Save clip dialog ────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 // lib/widgets/playback_controls.dart
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,15 @@ import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../services/export_service.dart';
 import 'app_notification.dart';
+
+// ─── Theme constants ─────────────────────────────────────────────────────────
+
+const _panelBg    = Color(0xFF0D1117);
+const _pillBg     = Color(0xFF111820);
+const _pillBorder = Color(0xFF1E2630);
+const _cyan       = Color(0xFF4FC3F7);
+
+// ─── Main controls widget ────────────────────────────────────────────────────
 
 class PlaybackControls extends ConsumerStatefulWidget {
   final VoidCallback  onPrevious;
@@ -50,24 +60,21 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
 
   @override
   Widget build(BuildContext context) {
-    final playback    = ref.watch(playbackProvider);
-    final pairs       = ref.watch(videoPairListProvider);
-    final index       = ref.watch(currentIndexProvider);
-    final syncOffset  = ref.watch(syncOffsetProvider);
-    final sortOrder   = ref.watch(sortOrderProvider);
-    final layout      = ref.watch(layoutConfigProvider);
-    final exportProg  = ref.watch(exportProgressProvider);
-    // Volume providers (kept for reference in controls below)
-    // final frontVolume = ref.watch(frontVolumeProvider);
-    // final backVolume  = ref.watch(backVolumeProvider);
+    final playback     = ref.watch(playbackProvider);
+    final pairs        = ref.watch(videoPairListProvider);
+    final index        = ref.watch(currentIndexProvider);
+    final syncOffset   = ref.watch(syncOffsetProvider);
+    final sortOrder    = ref.watch(sortOrderProvider);
+    final layout       = ref.watch(layoutConfigProvider);
+    final exportProg   = ref.watch(exportProgressProvider);
     final saveProgress = ref.watch(savingClipsProvider);
     final isSaving     = saveProgress != null;
-    final notifier    = ref.read(playbackProvider.notifier);
-    final sc          = ref.watch(shortcutConfigProvider);
+    final notifier     = ref.read(playbackProvider.notifier);
+    final sc           = ref.watch(shortcutConfigProvider);
 
-    final hasPrev  = index > 0;
-    final hasNext  = index < pairs.length - 1;
-    final isLoaded = playback.isLoaded;
+    final hasPrev     = index > 0;
+    final hasNext     = index < pairs.length - 1;
+    final isLoaded    = playback.isLoaded;
     final isExporting = exportProg != null;
 
     final player = playback.hasFront
@@ -75,75 +82,316 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
         : notifier.backPlayer;
 
     return Container(
-      color: const Color(0xFF1A1A1A),
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      decoration: const BoxDecoration(
+        color: _panelBg,
+        border: Border(top: BorderSide(color: _pillBorder)),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // ── Row 1: Transport + Seek bar ─────────────────────
+        StreamBuilder<Duration>(
+          stream: player.stream.position,
+          builder: (_, posSnap) => StreamBuilder<Duration>(
+            stream: player.stream.duration,
+            builder: (_, durSnap) {
+              // Use player.state as fallback — the broadcast stream
+              // may have already emitted before this widget mounted.
+              final pos = posSnap.data ?? player.state.position;
+              final dur = durSnap.data ?? player.state.duration;
+              final progress = dur.inMilliseconds > 0
+                  ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+                  : 0.0;
 
-        // ── Row 1: clip info + tools ──────────────────────
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Transport pill
+                  _Pill(children: [
+                    _PillIconBtn(
+                      icon: Icons.skip_previous_rounded,
+                      enabled: hasPrev,
+                      tooltip: 'Previous (${sc.label(ShortcutAction.previousClip)})',
+                      onTap: () {
+                        widget.onPrevious();
+                        widget.focusRequester?.call();
+                      },
+                    ),
+                    _PillIconBtn(
+                      icon: Icons.replay_10_rounded,
+                      enabled: isLoaded,
+                      tooltip: 'Back 10s (${sc.label(ShortcutAction.seekBackward)})',
+                      onTap: () {
+                        notifier.seekRelative(const Duration(seconds: -10));
+                        widget.focusRequester?.call();
+                      },
+                    ),
+                    const SizedBox(width: 2),
+                    // Play / Pause
+                    Tooltip(
+                      message: 'Play / Pause (${sc.label(ShortcutAction.playPause)})',
+                      child: GestureDetector(
+                        onTap: isLoaded
+                            ? () { notifier.togglePlay(); widget.focusRequester?.call(); }
+                            : null,
+                        child: Container(
+                          width: 34, height: 34,
+                          decoration: BoxDecoration(
+                            color: isLoaded
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(17),
+                          ),
+                          child: Icon(
+                            playback.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: isLoaded ? Colors.white : Colors.white24,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    _PillIconBtn(
+                      icon: Icons.forward_10_rounded,
+                      enabled: isLoaded,
+                      tooltip: 'Forward 10s (${sc.label(ShortcutAction.seekForward)})',
+                      onTap: () {
+                        notifier.seekRelative(const Duration(seconds: 10));
+                        widget.focusRequester?.call();
+                      },
+                    ),
+                    _PillIconBtn(
+                      icon: Icons.skip_next_rounded,
+                      enabled: hasNext,
+                      tooltip: 'Next (${sc.label(ShortcutAction.nextClip)})',
+                      onTap: () {
+                        widget.onNext();
+                        widget.focusRequester?.call();
+                      },
+                    ),
+                  ]),
+                  const SizedBox(width: 10),
+                  const Text('10s',
+                      style: TextStyle(color: Colors.white30, fontSize: 11)),
+                  const SizedBox(width: 10),
+
+                  // Seek bar with floating time label
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Floating time indicator
+                        SizedBox(
+                          height: 18,
+                          child: LayoutBuilder(builder: (_, constraints) {
+                            final w = constraints.maxWidth;
+                            const labelW = 48.0;
+                            final labelX =
+                                (w * progress - labelW / 2).clamp(0.0, w - labelW);
+                            return Stack(children: [
+                              Positioned(
+                                left: labelX,
+                                child: Container(
+                                  width: labelW,
+                                  alignment: Alignment.center,
+                                  padding: const EdgeInsets.symmetric(vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: _pillBg,
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: _pillBorder),
+                                  ),
+                                  child: Text(_fmt(pos),
+                                      style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 10,
+                                          fontFamily: 'monospace')),
+                                ),
+                              ),
+                            ]);
+                          }),
+                        ),
+                        // Seek slider with tick marks
+                        SizedBox(
+                          height: 24,
+                          child: Stack(children: [
+                            Positioned.fill(
+                              child: CustomPaint(painter: _TickPainter()),
+                            ),
+                            Positioned.fill(
+                              child: ExcludeFocus(
+                                child: SliderTheme(
+                                  data: SliderTheme.of(context).copyWith(
+                                    trackHeight: 3,
+                                    thumbShape: const RoundSliderThumbShape(
+                                        enabledThumbRadius: 6),
+                                    overlayShape:
+                                        const RoundSliderOverlayShape(
+                                            overlayRadius: 10),
+                                    activeTrackColor: _cyan,
+                                    inactiveTrackColor:
+                                        Colors.white.withValues(alpha: 0.08),
+                                    thumbColor: Colors.white,
+                                  ),
+                                  child: Slider(
+                                    value: progress,
+                                    onChanged: isLoaded
+                                        ? (v) => notifier.seekTo(Duration(
+                                            milliseconds:
+                                                (v * dur.inMilliseconds)
+                                                    .round()))
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_fmt(dur),
+                      style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                          fontFamily: 'monospace')),
+                ],
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 6),
+
+        // ── Row 2: Tool pills ───────────────────────────────
         Row(children: [
-          // Clip counter
+          // Clip info
           if (pairs.isNotEmpty) ...[
-            Text('${index + 1} / ${pairs.length}',
-              style: const TextStyle(color: Colors.white38, fontSize: 11)),
-            const SizedBox(width: 6),
-            _statusBadge(pairs[index]),
-            if (pairs[index].isLocked) ...[
+            _Pill(children: [
+              Text('${index + 1}/${pairs.length}',
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 11)),
+              const SizedBox(width: 6),
+              _statusBadge(pairs[index]),
+              if (pairs[index].isLocked) ...[
+                const SizedBox(width: 4),
+                _pill('🔒', Colors.red.shade300),
+              ],
               const SizedBox(width: 4),
-              _pill('🔒', Colors.red.shade300),
-            ],
+              _PillIconBtn(
+                icon: sortOrder == SortOrder.oldestFirst
+                    ? Icons.arrow_upward_rounded
+                    : Icons.arrow_downward_rounded,
+                enabled: true,
+                tooltip: 'Toggle sort (${sc.label(ShortcutAction.toggleSort)})',
+                onTap: () {
+                  final next = sortOrder == SortOrder.oldestFirst
+                      ? SortOrder.newestFirst
+                      : SortOrder.oldestFirst;
+                  ref.read(sortOrderProvider.notifier).state = next;
+                  ref.read(videoPairListProvider.notifier).applySort(next);
+                  ref.read(currentIndexProvider.notifier).state = 0;
+                  widget.focusRequester?.call();
+                },
+                size: 14,
+              ),
+            ]),
+            const SizedBox(width: 6),
           ],
-          const Spacer(),
 
-          // Sort toggle
-          _ToolBtn(
-            icon: sortOrder == SortOrder.oldestFirst
-                ? Icons.arrow_upward_rounded
-                : Icons.arrow_downward_rounded,
-            label: sortOrder == SortOrder.oldestFirst
-                ? 'Oldest first'
-                : 'Newest first',
-            tooltip: 'Toggle sort order (${sc.label(ShortcutAction.toggleSort)})',
-            onPressed: () {
-              final next = sortOrder == SortOrder.oldestFirst
-                  ? SortOrder.newestFirst
-                  : SortOrder.oldestFirst;
-              ref.read(sortOrderProvider.notifier).state = next;
-              ref.read(videoPairListProvider.notifier).applySort(next);
-              ref.read(currentIndexProvider.notifier).state = 0;
+          // Speed pill with presets
+          _SpeedPill(
+            enabled: isLoaded,
+            onChanged: (speed) {
+              ref.read(playbackSpeedProvider.notifier).state = speed;
+              notifier.setSpeed(speed);
               widget.focusRequester?.call();
             },
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
 
-          // Zoom controls
-          _ToolBtn(
-            icon: Icons.zoom_in_rounded,
-            label: '+',
-            tooltip: 'Zoom in (${sc.label(ShortcutAction.zoomIn)})',
-            onPressed: () => widget.onZoomIn?.call(),
-          ),
-          _ToolBtn(
-            icon: Icons.zoom_out_rounded,
-            label: '-',
-            tooltip: 'Zoom out (${sc.label(ShortcutAction.zoomOut)})',
-            onPressed: () => widget.onZoomOut?.call(),
-          ),
-          const SizedBox(width: 4),
+          // Zoom
+          _Pill(children: [
+            _PillIconBtn(
+              icon: Icons.zoom_in_rounded,
+              enabled: true,
+              tooltip: 'Zoom in (${sc.label(ShortcutAction.zoomIn)})',
+              onTap: () => widget.onZoomIn?.call(),
+              size: 16,
+            ),
+            _PillIconBtn(
+              icon: Icons.zoom_out_rounded,
+              enabled: true,
+              tooltip: 'Zoom out (${sc.label(ShortcutAction.zoomOut)})',
+              onTap: () => widget.onZoomOut?.call(),
+              size: 16,
+            ),
+          ]),
+          const SizedBox(width: 6),
 
-          // Volume controls — vertical slider on hover
+          // Sync toggle
+          GestureDetector(
+            onTap: () => setState(() => _showSync = !_showSync),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: _showSync ? _cyan.withValues(alpha: 0.1) : _pillBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _showSync
+                      ? _cyan.withValues(alpha: 0.4)
+                      : _pillBorder,
+                ),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.sync_rounded,
+                    size: 14, color: _showSync ? _cyan : Colors.white38),
+                const SizedBox(width: 4),
+                Text(
+                  syncOffset == 0
+                      ? 'Sync'
+                      : '${syncOffset > 0 ? "+" : ""}${syncOffset}ms',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: _showSync ? _cyan : Colors.white38),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 6),
+
+          // Layout (only when both cameras present)
+          if (playback.hasFront && playback.hasBack) ...[
+            GestureDetector(
+              key: widget.layoutBtnKey,
+              onTap: widget.onLayout,
+              child: _Pill(children: [
+                const Icon(Icons.view_quilt_rounded,
+                    size: 14, color: Colors.white54),
+                const SizedBox(width: 4),
+                Text(_layoutLabel(layout.mode),
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 11)),
+              ]),
+            ),
+            const SizedBox(width: 6),
+          ],
+
+          // Volume controls
           if (playback.hasFront && playback.hasBack) ...[
             _VolumeBtn(
               label: 'F',
               volume: ref.watch(frontVolumeProvider),
               onVolumeChanged: (v) {
                 ref.read(frontVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setFrontVolume(v);
+                notifier.setFrontVolume(v);
               },
               onMuteToggle: () {
                 final cur = ref.read(frontVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(frontVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontVolume(next);
+                notifier.setFrontVolume(next);
                 widget.focusRequester?.call();
               },
             ),
@@ -153,281 +401,116 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
               volume: ref.watch(backVolumeProvider),
               onVolumeChanged: (v) {
                 ref.read(backVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setBackVolume(v);
+                notifier.setBackVolume(v);
               },
               onMuteToggle: () {
                 final cur = ref.read(backVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(backVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackVolume(next);
+                notifier.setBackVolume(next);
                 widget.focusRequester?.call();
               },
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
           ] else if (playback.hasFront) ...[
             _VolumeBtn(
               label: 'Vol',
               volume: ref.watch(frontVolumeProvider),
               onVolumeChanged: (v) {
                 ref.read(frontVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setFrontVolume(v);
+                notifier.setFrontVolume(v);
               },
               onMuteToggle: () {
                 final cur = ref.read(frontVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(frontVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setFrontVolume(next);
+                notifier.setFrontVolume(next);
                 widget.focusRequester?.call();
               },
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
           ] else if (playback.hasBack) ...[
             _VolumeBtn(
               label: 'Vol',
               volume: ref.watch(backVolumeProvider),
               onVolumeChanged: (v) {
                 ref.read(backVolumeProvider.notifier).state = v;
-                ref.read(playbackProvider.notifier).setBackVolume(v);
+                notifier.setBackVolume(v);
               },
               onMuteToggle: () {
                 final cur = ref.read(backVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(backVolumeProvider.notifier).state = next;
-                ref.read(playbackProvider.notifier).setBackVolume(next);
+                notifier.setBackVolume(next);
                 widget.focusRequester?.call();
               },
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
           ],
-
-          // Layout — only useful when both cameras are present
-          if (playback.hasFront && playback.hasBack)
-            _ToolBtn(
-              key:     widget.layoutBtnKey,
-              icon:    Icons.view_quilt_rounded,
-              label:   _layoutLabel(layout.mode),
-              tooltip: 'Change layout (${sc.label(ShortcutAction.layoutPopup)})',
-              onPressed: widget.onLayout,
-            ),
-          const SizedBox(width: 4),
-
-          // Open folder
-          _ToolBtn(
-            icon:    Icons.folder_open_rounded,
-            label:   'Open',
-            tooltip: 'Open dashcam folder (${sc.label(ShortcutAction.openFolder)})',
-            onPressed: widget.onFolder,
-          ),
-          const SizedBox(width: 4),
-
-          // Map
-          _ToolBtn(
-            icon:    Icons.map_rounded,
-            label:   'Map',
-            tooltip: 'Show GPS location on map (${sc.label(ShortcutAction.mapSidebar)})',
-            onPressed: () {
-              widget.onMap?.call();
-            },
-          ),
-          const SizedBox(width: 4),
-
-          // Export single clip
-          _ExportBtn(
-            enabled:    isLoaded && !isExporting,
-            progress:   exportProg,
-            onExport:   () => _doExport(context),
-          ),
-          const SizedBox(width: 4),
-
-          // Save current clip
-          _SaveBtn(
-            isSaving: isSaving,
-            progressText: saveProgress,
-            onPressed: isSaving ? null : () {
-              widget.onSaveClip?.call();
-            },
-          ),
-          const SizedBox(width: 4),
-
-          // Close folder
-          _ToolBtn(
-            icon:    Icons.folder_off_rounded,
-            label:   'Close Folder',
-            tooltip: 'Close loaded folder (${sc.label(ShortcutAction.closeFolder)})',
-            onPressed: () {
-              widget.onCloseFolder?.call();
-            },
-          ),
-          const SizedBox(width: 4),
-
-          // Quit
-          _ToolBtn(
-            icon:    Icons.power_settings_new_rounded,
-            label:   'Quit',
-            tooltip: 'Quit application (${sc.label(ShortcutAction.quit)})',
-            onPressed: () {
-              widget.onQuit?.call();
-            },
-          ),
-        ]),
-
-        const SizedBox(height: 2),
-
-        // ── Row 2: seek bar ───────────────────────────────
-        StreamBuilder<Duration>(
-          stream: player.stream.position,
-          builder: (_, posSnap) => StreamBuilder<Duration>(
-            stream: player.stream.duration,
-            builder: (_, durSnap) {
-              final pos = posSnap.data ?? Duration.zero;
-              final dur = durSnap.data ?? Duration.zero;
-              final progress = dur.inMilliseconds > 0
-                  ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-                  : 0.0;
-              return Row(children: [
-                Text(_fmt(pos),
-                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                Expanded(
-                  child: ExcludeFocus(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight:  3,
-                        thumbShape:   const RoundSliderThumbShape(enabledThumbRadius: 6),
-                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                      ),
-                      child: Slider(
-                        value:     progress,
-                        onChanged: isLoaded
-                            ? (v) => notifier.seekTo(
-                                Duration(milliseconds: (v * dur.inMilliseconds).round()))
-                            : null,
-                        activeColor:   const Color(0xFF4FC3F7),
-                        inactiveColor: Colors.white12,
-                        thumbColor:    Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                Text(_fmt(dur),
-                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              ]);
-            },
-          ),
-        ),
-
-        // ── Row 3: transport ──────────────────────────────
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _NavBtn(icon: Icons.skip_previous_rounded,
-            enabled: hasPrev, tooltip: 'Previous (${sc.label(ShortcutAction.previousClip)})',
-            onPressed: () { widget.onPrevious(); widget.focusRequester?.call(); }),
-          _NavBtn(icon: Icons.replay_10_rounded,
-            enabled: isLoaded, tooltip: 'Back 10s (${sc.label(ShortcutAction.seekBackward)})',
-            onPressed: () {
-              notifier.seekRelative(const Duration(seconds: -10));
-              widget.focusRequester?.call();
-            }),
-
-          const SizedBox(width: 8),
-          // Play/Pause big button
-          Tooltip(
-            message: 'Play / Pause (${sc.label(ShortcutAction.playPause)})',
-            child: GestureDetector(
-            onTap: isLoaded ? () { notifier.togglePlay(); widget.focusRequester?.call(); } : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: 50, height: 50,
-              decoration: BoxDecoration(
-                color: isLoaded ? const Color(0xFF4FC3F7) : Colors.white12,
-                borderRadius: BorderRadius.circular(25),
-              ),
-              child: Icon(
-                playback.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                color: isLoaded ? Colors.black : Colors.white24,
-                size: 26,
-              ),
-            ),
-          ),
-          ),
-          const SizedBox(width: 8),
-
-          _NavBtn(icon: Icons.forward_10_rounded,
-            enabled: isLoaded, tooltip: 'Forward 10s (${sc.label(ShortcutAction.seekForward)})',
-            onPressed: () {
-              notifier.seekRelative(const Duration(seconds: 10));
-              widget.focusRequester?.call();
-            }),
-          _NavBtn(icon: Icons.skip_next_rounded,
-            enabled: hasNext, tooltip: 'Next (${sc.label(ShortcutAction.nextClip)})',
-            onPressed: () { widget.onNext(); widget.focusRequester?.call(); }),
-
-          const SizedBox(width: 12),
-
-          // Speed control
-          _SpeedBtn(
-            enabled: isLoaded,
-            onChanged: (speed) {
-              ref.read(playbackSpeedProvider.notifier).state = speed;
-              notifier.setSpeed(speed);
-              widget.focusRequester?.call();
-            },
-          ),
 
           const Spacer(),
 
-          // Sync toggle
-          GestureDetector(
-            onTap: () => setState(() => _showSync = !_showSync),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: _showSync
-                    ? const Color(0xFF4FC3F7).withValues(alpha: 0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: _showSync
-                      ? const Color(0xFF4FC3F7).withValues(alpha: 0.5)
-                      : Colors.white12,
-                ),
-              ),
-              child: Row(children: [
-                Icon(Icons.sync_rounded,
-                  size: 14,
-                  color: _showSync ? const Color(0xFF4FC3F7) : Colors.white38),
-                const SizedBox(width: 4),
-                Text(
-                  syncOffset == 0
-                      ? 'Sync'
-                      : '${syncOffset > 0 ? "+" : ""}${syncOffset}ms',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: _showSync ? const Color(0xFF4FC3F7) : Colors.white38,
-                  ),
-                ),
+          // Map
+          Tooltip(
+            message: 'Map (${sc.label(ShortcutAction.mapSidebar)})',
+            child: GestureDetector(
+              onTap: () => widget.onMap?.call(),
+              child: const _Pill(children: [
+                Icon(Icons.map_rounded, size: 14, color: Colors.white54),
               ]),
             ),
           ),
+          const SizedBox(width: 6),
+
+          // Export (cyan highlighted)
+          _ExportBtn(
+            enabled: isLoaded && !isExporting,
+            progress: exportProg,
+            onExport: () => _doExport(context),
+          ),
+          const SizedBox(width: 6),
+
+          // Save + Open Folder
+          _Pill(children: [
+            _SaveInline(
+              isSaving: isSaving,
+              progressText: saveProgress,
+              onPressed: isSaving ? null : () => widget.onSaveClip?.call(),
+            ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: 'Open folder (${sc.label(ShortcutAction.openFolder)})',
+              child: GestureDetector(
+                onTap: widget.onFolder,
+                child: const Text('Open Folder',
+                    style: TextStyle(color: Colors.white54, fontSize: 11)),
+              ),
+            ),
+          ]),
         ]),
 
-        // ── Sync slider (expandable) ───────────────────────
+        // ── Expandable sync panel ───────────────────────────
         AnimatedSize(
           duration: const Duration(milliseconds: 200),
-          child: _showSync ? _SyncPanel(syncOffsetMs: syncOffset) : const SizedBox.shrink(),
+          child: _showSync
+              ? _SyncPanel(syncOffsetMs: syncOffset)
+              : const SizedBox.shrink(),
         ),
       ]),
     );
   }
 
+  // ── Export logic ──────────────────────────────────────────
+
   Future<void> _doExport(BuildContext ctx) async {
     final pair = ref.read(currentPairProvider);
     if (pair == null) return;
 
-    // Ask for output path
     final savePath = await FilePicker.platform.saveFile(
-      dialogTitle:   'Save exported video',
-      fileName:      'dashcam_${pair.id}.mp4',
+      dialogTitle:       'Save exported video',
+      fileName:          'dashcam_${pair.id}.mp4',
       allowedExtensions: ['mp4'],
-      type: FileType.custom,
+      type:              FileType.custom,
     );
     if (savePath == null) return;
 
@@ -452,7 +535,8 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     if (mounted) {
       if (ok) {
         showAppNotification(ctx, 'Exported to $savePath',
-            icon: Icons.movie_creation_rounded, type: NotificationType.success);
+            icon: Icons.movie_creation_rounded,
+            type: NotificationType.success);
         Process.run('explorer', ['/select,', savePath]);
       } else {
         showAppNotification(ctx, 'Export failed — is FFmpeg installed?',
@@ -461,8 +545,10 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     }
   }
 
+  // ── Helpers ───────────────────────────────────────────────
+
   Widget _statusBadge(VideoPair pair) {
-    if (pair.isPaired) return _pill('F+B', const Color(0xFF4FC3F7));
+    if (pair.isPaired) return _pill('F+B', _cyan);
     if (pair.hasFront && !pair.hasBack && pair.source == 'local') {
       return _pill('Video', Colors.teal);
     }
@@ -471,23 +557,24 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
   }
 
   Widget _pill(String text, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-    decoration: BoxDecoration(
-      color:        color.withValues(alpha: 0.15),
-      border:       Border.all(color: color.withValues(alpha: 0.4)),
-      borderRadius: BorderRadius.circular(3),
-    ),
-    child: Text(text,
-      style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+      );
 
   String _layoutLabel(LayoutMode m) => switch (m) {
-    LayoutMode.sideBySide => 'Side-by-side',
-    LayoutMode.stacked    => 'Stacked',
-    LayoutMode.pip        => 'PIP',
-    LayoutMode.frontOnly  => 'Front only',
-    LayoutMode.backOnly   => 'Back only',
-  };
+        LayoutMode.sideBySide => 'Side-by-side',
+        LayoutMode.stacked    => 'Stacked',
+        LayoutMode.pip        => 'PIP',
+        LayoutMode.frontOnly  => 'Front only',
+        LayoutMode.backOnly   => 'Back only',
+      };
 
   String _fmt(Duration d) {
     final h = d.inHours;
@@ -497,7 +584,83 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
   }
 }
 
-// ─── Export button with progress ─────────────────────────────────────────────
+// ─── Pill container ──────────────────────────────────────────────────────────
+
+class _Pill extends StatelessWidget {
+  final List<Widget> children;
+  const _Pill({required this.children});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: _pillBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _pillBorder),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: children),
+      );
+}
+
+// ─── Pill icon button ────────────────────────────────────────────────────────
+
+class _PillIconBtn extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final double size;
+  const _PillIconBtn({
+    required this.icon,
+    required this.enabled,
+    required this.tooltip,
+    this.onTap,
+    this.size = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: ExcludeFocus(
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(icon,
+                  size: size,
+                  color: enabled ? Colors.white70 : Colors.white24),
+            ),
+          ),
+        ),
+      );
+}
+
+// ─── Tick mark painter for seek bar ──────────────────────────────────────────
+
+class _TickPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    final count = (size.width / 12).floor();
+    if (count <= 0) return;
+    final step = size.width / count;
+    final cy = size.height / 2;
+    for (var i = 0; i <= count; i++) {
+      final x = i * step;
+      final isMajor = i % 5 == 0;
+      final h = isMajor ? 6.0 : 3.0;
+      canvas.drawLine(Offset(x, cy - h), Offset(x, cy + h), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ─── Export button (cyan highlighted) ────────────────────────────────────────
 
 class _ExportBtn extends ConsumerWidget {
   final bool    enabled;
@@ -521,28 +684,31 @@ class _ExportBtn extends ConsumerWidget {
         onTap: enabled ? onExport : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: enabled
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.white12),
+                ? _cyan.withValues(alpha: 0.15)
+                : _pillBg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: enabled
+                  ? _cyan.withValues(alpha: 0.5)
+                  : _pillBorder,
+            ),
           ),
-          child: Row(children: [
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
             if (isExporting)
               SizedBox(
-                width: 12, height: 12,
+                width: 13, height: 13,
                 child: CircularProgressIndicator(
                   value:       progress,
                   strokeWidth: 1.5,
-                  color:       const Color(0xFF4FC3F7),
+                  color:       _cyan,
                 ),
               )
             else
               Icon(Icons.movie_creation_outlined,
-                size: 14,
-                color: enabled ? Colors.white60 : Colors.white24),
+                  size: 14, color: enabled ? _cyan : Colors.white24),
             const SizedBox(width: 5),
             Text(
               isExporting
@@ -550,7 +716,8 @@ class _ExportBtn extends ConsumerWidget {
                   : 'Export',
               style: TextStyle(
                 fontSize: 11,
-                color: enabled ? Colors.white60 : Colors.white24,
+                fontWeight: FontWeight.w600,
+                color: enabled ? _cyan : Colors.white24,
               ),
             ),
           ]),
@@ -560,7 +727,186 @@ class _ExportBtn extends ConsumerWidget {
   }
 }
 
-// ─── Sync panel ───────────────────────────────────────────────────────────────
+// ─── Save inline button ─────────────────────────────────────────────────────
+
+class _SaveInline extends ConsumerWidget {
+  final bool isSaving;
+  final String? progressText;
+  final VoidCallback? onPressed;
+  const _SaveInline({
+    required this.isSaving,
+    this.progressText,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sc = ref.watch(shortcutConfigProvider);
+    return Tooltip(
+      message: isSaving
+          ? 'Saving...'
+          : 'Save clip files (${sc.label(ShortcutAction.saveClips)})',
+      child: GestureDetector(
+        onTap: onPressed,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (isSaving)
+            const SizedBox(
+              width: 12, height: 12,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.5, color: _cyan),
+            )
+          else
+            Icon(Icons.save_alt_rounded,
+                size: 13,
+                color: onPressed != null ? Colors.white54 : Colors.white24),
+          const SizedBox(width: 4),
+          Text(
+            isSaving ? (progressText ?? 'Saving...') : 'Save Clip',
+            style: TextStyle(
+              fontSize: 11,
+              color: isSaving
+                  ? _cyan
+                  : onPressed != null
+                      ? Colors.white54
+                      : Colors.white24,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Speed pill with presets ─────────────────────────────────────────────────
+
+class _SpeedPill extends ConsumerWidget {
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+  const _SpeedPill({required this.enabled, required this.onChanged});
+
+  static const _presets = [0.5, 1.0, 2.0, 5.0];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final speed = ref.watch(playbackSpeedProvider);
+    final sc    = ref.watch(shortcutConfigProvider);
+
+    return PopupMenuButton<double>(
+      onSelected: onChanged,
+      enabled: enabled,
+      tooltip: 'All speeds (${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)})',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      color: const Color(0xFF161D26),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      offset: const Offset(0, -200),
+      itemBuilder: (_) => [
+        for (final s in playbackSpeeds)
+          PopupMenuItem(
+            value: s,
+            height: 34,
+            child: Row(children: [
+              if (s == speed)
+                const Icon(Icons.check_rounded, size: 14, color: _cyan)
+              else
+                const SizedBox(width: 14),
+              const SizedBox(width: 8),
+              Text(
+                s == s.roundToDouble() ? '${s.round()}x' : '${s}x',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: s == speed ? _cyan : Colors.white60,
+                  fontWeight: s == speed ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ]),
+          ),
+      ],
+      child: _Pill(children: [
+        const Text('Speed',
+            style: TextStyle(
+                color: Colors.white38,
+                fontSize: 11,
+                fontWeight: FontWeight.w500)),
+        const SizedBox(width: 6),
+        for (final s in _presets) ...[
+          _SpeedPresetChip(
+            speed: s,
+            active: speed == s,
+            enabled: enabled,
+            onTap: () => onChanged(s),
+          ),
+          if (s != _presets.last) const SizedBox(width: 2),
+        ],
+        // Show current speed if it's not a preset
+        if (!_presets.contains(speed)) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: _cyan.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: _cyan.withValues(alpha: 0.5)),
+            ),
+            child: Text(
+              speed == speed.roundToDouble()
+                  ? '${speed.round()}x'
+                  : '${speed}x',
+              style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: _cyan),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _SpeedPresetChip extends StatelessWidget {
+  final double speed;
+  final bool active;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _SpeedPresetChip({
+    required this.speed,
+    required this.active,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: active ? _cyan.withValues(alpha: 0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: active
+                  ? _cyan.withValues(alpha: 0.5)
+                  : Colors.transparent,
+            ),
+          ),
+          child: Text(
+            speed == speed.roundToDouble()
+                ? '${speed.round()}x'
+                : '${speed}x',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              color: active
+                  ? _cyan
+                  : (enabled ? Colors.white54 : Colors.white24),
+            ),
+          ),
+        ),
+      );
+}
+
+// ─── Sync panel ──────────────────────────────────────────────────────────────
 
 class _SyncPanel extends ConsumerWidget {
   final int syncOffsetMs;
@@ -569,17 +915,17 @@ class _SyncPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.only(top: 6),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Divider(color: Colors.white12, height: 10),
+        const Divider(color: _pillBorder, height: 10),
         Row(children: [
           const Text('Sync offset',
-            style: TextStyle(color: Colors.white54, fontSize: 11)),
+              style: TextStyle(color: Colors.white54, fontSize: 11)),
           const Spacer(),
           Text(
             '${syncOffsetMs > 0 ? "+" : ""}$syncOffsetMs ms  '
             '(${syncOffsetMs > 0 ? "front ahead" : syncOffsetMs < 0 ? "back ahead" : "aligned"})',
-            style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11),
+            style: const TextStyle(color: _cyan, fontSize: 11),
           ),
           const SizedBox(width: 8),
           GestureDetector(
@@ -588,12 +934,17 @@ class _SyncPanel extends ConsumerWidget {
               ref.read(playbackProvider.notifier).applySyncOffset(0);
             },
             child: const Text('Reset',
-              style: TextStyle(color: Colors.white30, fontSize: 10)),
+                style: TextStyle(color: Colors.white30, fontSize: 10)),
           ),
         ]),
         ExcludeFocus(
           child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 2),
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 2,
+              activeTrackColor: _cyan,
+              inactiveTrackColor: Colors.white12,
+              thumbColor: Colors.white,
+            ),
             child: Slider(
               min: -5000, max: 5000, divisions: 200,
               value:       syncOffsetMs.toDouble(),
@@ -601,54 +952,30 @@ class _SyncPanel extends ConsumerWidget {
                   ref.read(syncOffsetProvider.notifier).state = v.round(),
               onChangeEnd: (v) =>
                   ref.read(playbackProvider.notifier).applySyncOffset(v.round()),
-              activeColor:   const Color(0xFF4FC3F7),
-              inactiveColor: Colors.white12,
             ),
           ),
         ),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: const [
-          Text('-5 s',    style: TextStyle(color: Colors.white24, fontSize: 9)),
-          Text('aligned', style: TextStyle(color: Colors.white24, fontSize: 9)),
-          Text('+5 s',    style: TextStyle(color: Colors.white24, fontSize: 9)),
-        ]),
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('-5 s',
+                style: TextStyle(color: Colors.white24, fontSize: 9)),
+            Text('aligned',
+                style: TextStyle(color: Colors.white24, fontSize: 9)),
+            Text('+5 s',
+                style: TextStyle(color: Colors.white24, fontSize: 9)),
+          ],
+        ),
       ]),
     );
   }
 }
 
-// ─── Tiny nav icon button ─────────────────────────────────────────────────────
-
-class _NavBtn extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback? onPressed;
-  final String tooltip;
-  const _NavBtn({
-    required this.icon, required this.enabled,
-    required this.onPressed, required this.tooltip,
-  });
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: ExcludeFocus(
-      child: IconButton(
-        icon: Icon(icon),
-        color: enabled ? Colors.white70 : Colors.white24,
-        onPressed: enabled ? onPressed : null,
-        iconSize: 24,
-        padding: const EdgeInsets.all(6),
-        constraints: const BoxConstraints(),
-      ),
-    ),
-  );
-}
-
-// ─── Volume button with slider popup ─────────────────────────────────────────
+// ─── Volume button with popup slider ─────────────────────────────────────────
 
 class _VolumeBtn extends StatefulWidget {
   final String label;
-  final double volume; // 0-100
+  final double volume;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onMuteToggle;
   const _VolumeBtn({
@@ -664,6 +991,8 @@ class _VolumeBtn extends StatefulWidget {
 
 class _VolumeBtnState extends State<_VolumeBtn> {
   bool _showSlider = false;
+  // Timer prevents popup from closing while mouse travels from button to popup
+  Timer? _hideTimer;
 
   bool get _muted => widget.volume <= 0;
 
@@ -673,262 +1002,121 @@ class _VolumeBtnState extends State<_VolumeBtn> {
     return Icons.volume_up_rounded;
   }
 
+  void _show() {
+    _hideTimer?.cancel();
+    if (!_showSlider) setState(() => _showSlider = true);
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _showSlider = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
-      onEnter: (_) => setState(() => _showSlider = true),
-      onExit: (_) => setState(() => _showSlider = false),
+      onEnter: (_) => _show(),
+      onExit: (_) => _scheduleHide(),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           // Mute/unmute icon button
           GestureDetector(
             onTap: widget.onMuteToggle,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
                 color: _muted
-                    ? Colors.red.withValues(alpha: 0.15)
-                    : Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(6),
+                    ? Colors.red.withValues(alpha: 0.12)
+                    : _pillBg,
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _muted ? Colors.red.withValues(alpha: 0.5) : Colors.white12,
+                  color: _muted
+                      ? Colors.red.withValues(alpha: 0.4)
+                      : _pillBorder,
                 ),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(_icon, size: 13,
+                Icon(_icon,
+                    size: 13,
                     color: _muted ? Colors.redAccent : Colors.white54),
                 const SizedBox(width: 4),
                 Text(widget.label,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                      color: _muted ? Colors.redAccent : Colors.white54)),
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _muted ? Colors.redAccent : Colors.white54)),
               ]),
             ),
           ),
-          // Vertical volume slider popup (appears above on hover)
+          // Vertical slider popup
           if (_showSlider)
             Positioned(
-              bottom: 36,
-              left: 0,
-              child: Container(
-                width: 36,
-                height: 120,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      blurRadius: 12,
-                      offset: const Offset(0, -2),
-                    ),
-                  ],
-                ),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('${widget.volume.round()}',
-                      style: const TextStyle(color: Colors.white54,
-                          fontSize: 9, fontWeight: FontWeight.w600)),
-                  Expanded(
-                    child: RotatedBox(
-                      quarterTurns: 3,
-                      child: SliderTheme(
-                        data: SliderThemeData(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                          activeTrackColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
-                          inactiveTrackColor: Colors.white12,
-                          thumbColor: _muted ? Colors.redAccent : const Color(0xFF4FC3F7),
-                          overlayColor: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
-                        ),
-                        child: Slider(
-                          value: widget.volume,
-                          min: 0,
-                          max: 100,
-                          onChanged: widget.onVolumeChanged,
+              bottom: 28,
+              left: -2,
+              child: MouseRegion(
+                onEnter: (_) => _show(),
+                onExit: (_) => _scheduleHide(),
+                child: Container(
+                  width: 40,
+                  height: 130,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF161D26),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _pillBorder),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        blurRadius: 12,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('${widget.volume.round()}',
+                        style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600)),
+                    Expanded(
+                      child: RotatedBox(
+                        quarterTurns: 3,
+                        child: SliderTheme(
+                          data: SliderThemeData(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6),
+                            overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 10),
+                            activeTrackColor:
+                                _muted ? Colors.redAccent : _cyan,
+                            inactiveTrackColor: Colors.white12,
+                            thumbColor: _muted ? Colors.redAccent : _cyan,
+                            overlayColor: _cyan.withValues(alpha: 0.2),
+                          ),
+                          child: Slider(
+                            value: widget.volume,
+                            min: 0,
+                            max: 100,
+                            onChanged: widget.onVolumeChanged,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ]),
+                  ]),
+                ),
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-// ─── Save button with spinner ────────────────────────────────────────────────
-
-class _SaveBtn extends ConsumerWidget {
-  final bool isSaving;
-  final String? progressText;
-  final VoidCallback? onPressed;
-  const _SaveBtn({required this.isSaving, this.progressText, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sc = ref.watch(shortcutConfigProvider);
-    return Tooltip(
-      message: isSaving ? 'Saving...' : 'Save clip files to a folder (${sc.label(ShortcutAction.saveClips)})',
-      child: GestureDetector(
-        onTap: onPressed,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: isSaving
-                ? const Color(0xFF4FC3F7).withValues(alpha: 0.1)
-                : Colors.white.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isSaving
-                  ? const Color(0xFF4FC3F7).withValues(alpha: 0.4)
-                  : Colors.white12,
-            ),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (isSaving)
-              const SizedBox(
-                width: 13, height: 13,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  color: Color(0xFF4FC3F7),
-                ),
-              )
-            else
-              Icon(Icons.save_alt_rounded, size: 13,
-                  color: onPressed != null ? Colors.white54 : Colors.white24),
-            const SizedBox(width: 5),
-            Text(
-              isSaving ? (progressText ?? 'Saving...') : 'Save',
-              style: TextStyle(
-                fontSize: 11,
-                color: isSaving
-                    ? const Color(0xFF4FC3F7)
-                    : onPressed != null ? Colors.white54 : Colors.white24,
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Tool text+icon button ────────────────────────────────────────────────────
-
-class _ToolBtn extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final String   tooltip;
-  final VoidCallback onPressed;
-  const _ToolBtn({
-    super.key,
-    required this.icon, required this.label,
-    required this.tooltip, required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(children: [
-          Icon(icon, size: 13, color: Colors.white54),
-          const SizedBox(width: 4),
-          Text(label,
-            style: const TextStyle(color: Colors.white54, fontSize: 11)),
-        ]),
-      ),
-    ),
-  );
-}
-
-// ─── Speed control button ───────────────────────────────────────────────────
-
-class _SpeedBtn extends ConsumerWidget {
-  final bool enabled;
-  final ValueChanged<double> onChanged;
-  const _SpeedBtn({required this.enabled, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final speed = ref.watch(playbackSpeedProvider);
-    final sc    = ref.watch(shortcutConfigProvider);
-    final isNormal = speed == 1.0;
-
-    return PopupMenuButton<double>(
-      onSelected: onChanged,
-      enabled: enabled,
-      tooltip: 'Playback speed (${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)})',
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      color: const Color(0xFF222222),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      itemBuilder: (_) => [
-        for (final s in playbackSpeeds)
-          PopupMenuItem(
-            value: s,
-            height: 36,
-            child: Row(children: [
-              if (s == speed)
-                const Icon(Icons.check_rounded, size: 14, color: Color(0xFF4FC3F7))
-              else
-                const SizedBox(width: 14),
-              const SizedBox(width: 8),
-              Text(
-                s == s.roundToDouble() ? '${s.round()}x' : '${s}x',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: s == speed ? const Color(0xFF4FC3F7) : Colors.white60,
-                  fontWeight: s == speed ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ]),
-          ),
-      ],
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: isNormal
-              ? Colors.white.withValues(alpha: 0.06)
-              : const Color(0xFF4FC3F7).withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isNormal
-                ? Colors.white12
-                : const Color(0xFF4FC3F7).withValues(alpha: 0.5),
-          ),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.speed_rounded, size: 13,
-            color: isNormal
-                ? (enabled ? Colors.white54 : Colors.white24)
-                : const Color(0xFF4FC3F7)),
-          const SizedBox(width: 4),
-          Text(
-            speed == speed.roundToDouble() ? '${speed.round()}x' : '${speed}x',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: isNormal
-                  ? (enabled ? Colors.white54 : Colors.white24)
-                  : const Color(0xFF4FC3F7),
-            ),
-          ),
-        ]),
       ),
     );
   }
