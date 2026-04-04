@@ -1,10 +1,10 @@
 // lib/widgets/map_dialog.dart
 //
-// Interactive OpenStreetMap sidebar with coordinate input, search, zoom/pan,
-// multiple tile layers, and browser-open buttons.  State (coordinates, zoom,
-// tile layer) is persisted via Riverpod so it survives open/close cycles.
-// Shows device location by default on first open.
+// Interactive OpenStreetMap sidebar with GPS track synced to video playback.
+// Extracts per-second GPS data from .ts dashcam files and shows a live marker
+// with speed + timestamp, polyline trail, and auto-follow.
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +23,9 @@ const double _defaultZoom = 5;
 const double _coordZoom   = 15;
 const double _minWidth    = 280;
 const double _maxWidth    = 600;
+
+/// GPS point tuple: (seconds_offset, lat, lon, speed_kmh, datetime_string)
+typedef GpsPoint = (double, double, double, double, String);
 
 class MapSidebar extends ConsumerStatefulWidget {
   final String? videoPath;
@@ -45,6 +48,13 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   // Marker position (null = no marker)
   LatLng? _marker;
 
+  // GPS track data
+  List<GpsPoint>? _gpsTrack;
+  StreamSubscription? _trackSub;
+  double _currentSpeed = 0;
+  String _currentTime  = '';
+  bool   _autoFollow   = true;
+
   static const _tileLayers = [
     (label: 'Standard', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     (label: 'Topo',     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'),
@@ -54,17 +64,14 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   @override
   void initState() {
     super.initState();
-    // Restore persisted state
     final saved = ref.read(mapStateProvider);
-    if (saved.lat != null && saved.lon != null) {
+    if (widget.videoPath != null) {
+      _tryExtractGPS();
+    } else if (saved.lat != null && saved.lon != null) {
       _latCtrl.text = saved.lat!.toStringAsFixed(6);
       _lonCtrl.text = saved.lon!.toStringAsFixed(6);
       _marker = LatLng(saved.lat!, saved.lon!);
-    } else if (widget.videoPath != null) {
-      // Try extracting GPS from video metadata first
-      _tryExtractGPS();
     } else {
-      // No saved coords, no video — get device location
       _tryDeviceLocation();
     }
   }
@@ -73,35 +80,33 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   void didUpdateWidget(MapSidebar old) {
     super.didUpdateWidget(old);
     if (widget.videoPath != old.videoPath && widget.videoPath != null) {
+      _trackSub?.cancel();
       _tryExtractGPS();
     }
   }
 
   @override
   void dispose() {
+    _trackSub?.cancel();
     _latCtrl.dispose();
     _lonCtrl.dispose();
     _mapController.dispose();
     super.dispose();
   }
 
-  /// Save current state to provider so it survives sidebar close/reopen.
   void _persist() {
     if (!mounted) return;
     try {
       final cam = _mapController.camera;
       ref.read(mapStateProvider.notifier).state = MapState(
-        lat:       _lat,
-        lon:       _lon,
-        zoom:      cam.zoom,
+        lat: _lat, lon: _lon,
+        zoom: cam.zoom,
         tileLayer: ref.read(mapStateProvider).tileLayer,
       );
     } catch (_) {
       try {
-        ref.read(mapStateProvider.notifier).state = MapState(
-          lat: _lat,
-          lon: _lon,
-        );
+        ref.read(mapStateProvider.notifier).state =
+            MapState(lat: _lat, lon: _lon);
       } catch (_) {}
     }
   }
@@ -109,7 +114,100 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
   double? get _lat => double.tryParse(_latCtrl.text.trim());
   double? get _lon => double.tryParse(_lonCtrl.text.trim());
 
-  /// Try to get device location using platform-specific commands.
+  // ─── GPS extraction ──────────────────────────────────────────────────
+
+  Future<void> _tryExtractGPS() async {
+    setState(() { _loading = true; _error = null; _gpsTrack = null; });
+    _trackSub?.cancel();
+
+    // Try per-second GPS track first (for .ts dashcam files)
+    final track = await ExportService.extractGPSTrack(widget.videoPath!);
+    if (!mounted) return;
+    if (track != null && track.isNotEmpty) {
+      _gpsTrack = track;
+      final (_, lat, lon, spd, time) = track.first;
+      _latCtrl.text = lat.toStringAsFixed(6);
+      _lonCtrl.text = lon.toStringAsFixed(6);
+      _marker = LatLng(lat, lon);
+      _currentSpeed = spd;
+      _currentTime = time;
+      _moveToMarker(_coordZoom);
+      _persist();
+      appLog('Map', 'GPS track loaded: ${track.length} points');
+      setState(() => _loading = false);
+      _startTrackSync();
+      return;
+    }
+
+    // Fall back to single GPS point
+    final coords = await ExportService.extractGPS(widget.videoPath!);
+    if (!mounted) return;
+    if (coords != null) {
+      _latCtrl.text = coords.$1.toStringAsFixed(6);
+      _lonCtrl.text = coords.$2.toStringAsFixed(6);
+      _marker = LatLng(coords.$1, coords.$2);
+      _moveToMarker(_coordZoom);
+      appLog('Map', 'GPS extracted: ${coords.$1}, ${coords.$2}');
+    } else {
+      if (_marker == null) {
+        await _tryDeviceLocation();
+        if (_marker == null) {
+          _error = 'No GPS data found. Enter coordinates manually.';
+        }
+      }
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  // ─── Live track sync ─────────────────────────────────────────────────
+
+  void _startTrackSync() {
+    _trackSub?.cancel();
+    if (_gpsTrack == null || _gpsTrack!.isEmpty) return;
+
+    final notifier = ref.read(playbackProvider.notifier);
+    final playback = ref.read(playbackProvider);
+    final player = playback.hasFront ? notifier.frontPlayer : notifier.backPlayer;
+
+    _trackSub = player.stream.position.listen((pos) {
+      if (!mounted || _gpsTrack == null) return;
+      final secs = pos.inMilliseconds / 1000.0;
+
+      // Find closest GPS point
+      GpsPoint? closest;
+      double minDiff = double.infinity;
+      for (final point in _gpsTrack!) {
+        final diff = (point.$1 - secs).abs();
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = point;
+        }
+        if (diff > minDiff) break; // sorted — stop when diverging
+      }
+
+      if (closest != null && minDiff < 2.0) {
+        final (_, lat, lon, spd, time) = closest;
+        final newMarker = LatLng(lat, lon);
+        if (_marker == null || _marker!.latitude != lat || _marker!.longitude != lon) {
+          setState(() {
+            _marker = newMarker;
+            _currentSpeed = spd;
+            _currentTime = time;
+            _latCtrl.text = lat.toStringAsFixed(6);
+            _lonCtrl.text = lon.toStringAsFixed(6);
+          });
+          if (_autoFollow) {
+            try {
+              _mapController.move(newMarker, _mapController.camera.zoom);
+            } catch (_) {}
+          }
+        }
+      }
+    });
+  }
+
+  // ─── Device location fallback ────────────────────────────────────────
+
   Future<void> _tryDeviceLocation() async {
     setState(() { _loading = true; _error = null; });
     try {
@@ -127,7 +225,6 @@ class _MapSidebarState extends ConsumerState<MapSidebar> {
     if (mounted) setState(() => _loading = false);
   }
 
-  /// Get device GPS location via Windows.Devices.Geolocation (UWP API).
   static Future<(double, double)?> _getDeviceLocation() async {
     if (Platform.isWindows) {
       try {
@@ -160,27 +257,7 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
     return null;
   }
 
-  Future<void> _tryExtractGPS() async {
-    setState(() { _loading = true; _error = null; });
-    final coords = await ExportService.extractGPS(widget.videoPath!);
-    if (!mounted) return;
-    if (coords != null) {
-      _latCtrl.text = coords.$1.toStringAsFixed(6);
-      _lonCtrl.text = coords.$2.toStringAsFixed(6);
-      _marker = LatLng(coords.$1, coords.$2);
-      _moveToMarker(_coordZoom);
-      appLog('Map', 'GPS extracted: ${coords.$1}, ${coords.$2}');
-    } else {
-      // No GPS in video metadata — try device location as fallback
-      if (_marker == null) {
-        await _tryDeviceLocation();
-        if (_marker == null) {
-          _error = 'No GPS data found. Enter coordinates manually.';
-        }
-      }
-    }
-    if (mounted) setState(() => _loading = false);
-  }
+  // ─── Helpers ─────────────────────────────────────────────────────────
 
   void _searchCoords() {
     final lat = _lat;
@@ -189,41 +266,31 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
       setState(() => _error = 'Enter valid coordinates.');
       return;
     }
-    setState(() {
-      _error = null;
-      _marker = LatLng(lat, lon);
-    });
+    setState(() { _error = null; _marker = LatLng(lat, lon); });
     _moveToMarker(_coordZoom);
     _persist();
-    appLog('Map', 'Search: $lat, $lon');
   }
 
   void _moveToMarker(double zoom) {
-    if (_marker != null) {
-      _mapController.move(_marker!, zoom);
-    }
+    if (_marker != null) _mapController.move(_marker!, zoom);
   }
 
   void _zoomIn() {
     final cam = _mapController.camera;
-    final newZoom = (cam.zoom + 1).clamp(2.0, 18.0);
-    final target = _marker ?? cam.center;
-    _mapController.move(target, newZoom);
+    _mapController.move(_marker ?? cam.center, (cam.zoom + 1).clamp(2.0, 18.0));
   }
 
   void _zoomOut() {
     final cam = _mapController.camera;
-    final newZoom = (cam.zoom - 1).clamp(2.0, 18.0);
-    final target = _marker ?? cam.center;
-    _mapController.move(target, newZoom);
+    _mapController.move(_marker ?? cam.center, (cam.zoom - 1).clamp(2.0, 18.0));
   }
 
   Future<void> _openOSM() async {
     final lat = _lat ?? _defaultLat;
     final lon = _lon ?? _defaultLon;
-    final z   = _marker != null ? _coordZoom.round() : _defaultZoom.round();
+    final z = _marker != null ? _coordZoom.round() : _defaultZoom.round();
     final uri = Uri.parse(
-      'https://www.openstreetmap.org/?mlat=$lat&mlon=$lon#map=$z/$lat/$lon');
+        'https://www.openstreetmap.org/?mlat=$lat&mlon=$lon#map=$z/$lat/$lon');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -237,6 +304,8 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
+
+  // ─── Build ───────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -299,7 +368,6 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Lat / Lon row
                           Row(children: [
                             Expanded(
                               child: _CoordInput(
@@ -317,7 +385,6 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
                               ),
                             ),
                             const SizedBox(width: 6),
-                            // Search
                             _ActionIcon(
                               icon: Icons.search_rounded,
                               tooltip: 'Search coordinates',
@@ -341,7 +408,6 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
                                       color: Colors.orange, fontSize: 10)),
                               ),
                             const SizedBox(height: 6),
-                            // Action row: OSM, GMaps, tile layer
                             Row(children: [
                               _ActionChip(
                                 icon: Icons.public_rounded,
@@ -370,72 +436,140 @@ Write-Output "$($c.Latitude),$($c.Longitude)"
 
                     // ─── Interactive map ─────────────────
                     Expanded(
-                      child: FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: initialCenter,
-                          initialZoom: initialZoom,
-                          minZoom: 2,
-                          maxZoom: 18,
-                          interactionOptions: const InteractionOptions(
-                            flags: InteractiveFlag.all,
-                          ),
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate: _tileLayers[tileLayer].url,
-                            subdomains: const ['a', 'b', 'c'],
-                            userAgentPackageName: 'com.dashcam.player',
+                      child: Stack(children: [
+                        FlutterMap(
+                          mapController: _mapController,
+                          options: MapOptions(
+                            initialCenter: initialCenter,
+                            initialZoom: initialZoom,
+                            minZoom: 2,
                             maxZoom: 18,
+                            interactionOptions: const InteractionOptions(
+                              flags: InteractiveFlag.all,
+                            ),
+                            onPositionChanged: (pos, hasGesture) {
+                              if (hasGesture) _autoFollow = false;
+                            },
                           ),
-                          // Marker
-                          if (_marker != null)
-                            MarkerLayer(markers: [
-                              Marker(
-                                point: _marker!,
-                                width: 40, height: 40,
-                                alignment: Alignment.topCenter,
-                                child: const Icon(Icons.location_on,
-                                    color: Colors.red, size: 40),
-                              ),
-                            ]),
-                          // Zoom + re-center buttons
-                          Align(
-                            alignment: Alignment.bottomRight,
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _ZoomBtn(icon: Icons.add, onTap: _zoomIn),
-                                  const SizedBox(height: 4),
-                                  _ZoomBtn(icon: Icons.remove, onTap: _zoomOut),
-                                  const SizedBox(height: 4),
-                                  _ZoomBtn(
-                                    icon: Icons.my_location_rounded,
-                                    onTap: () {
-                                      if (_marker != null) {
-                                        _mapController.move(
-                                            _marker!, _coordZoom);
-                                      }
-                                    },
+                          children: [
+                            TileLayer(
+                              urlTemplate: _tileLayers[tileLayer].url,
+                              subdomains: const ['a', 'b', 'c'],
+                              userAgentPackageName: 'com.dashcam.player',
+                              maxZoom: 18,
+                            ),
+                            // GPS track polyline
+                            if (_gpsTrack != null && _gpsTrack!.length > 1)
+                              PolylineLayer(polylines: [
+                                Polyline(
+                                  points: _gpsTrack!
+                                      .map((p) => LatLng(p.$2, p.$3))
+                                      .toList(),
+                                  color: const Color(0xFF4FC3F7),
+                                  strokeWidth: 3.0,
+                                ),
+                              ]),
+                            // Marker with speed label
+                            if (_marker != null)
+                              MarkerLayer(markers: [
+                                Marker(
+                                  point: _marker!,
+                                  width: 90, height: 65,
+                                  alignment: Alignment.topCenter,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Speed badge
+                                      if (_gpsTrack != null)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 5, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black87,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            border: Border.all(
+                                                color: const Color(0xFF4FC3F7),
+                                                width: 0.5),
+                                          ),
+                                          child: Text(
+                                            '${_currentSpeed.round()} km/h',
+                                            style: const TextStyle(
+                                                color: Color(0xFF4FC3F7),
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      const Icon(Icons.navigation,
+                                          color: Colors.red, size: 28),
+                                    ],
                                   ),
-                                ],
+                                ),
+                              ]),
+                            // Zoom + re-center buttons
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _ZoomBtn(icon: Icons.add, onTap: _zoomIn),
+                                    const SizedBox(height: 4),
+                                    _ZoomBtn(
+                                        icon: Icons.remove, onTap: _zoomOut),
+                                    const SizedBox(height: 4),
+                                    _ZoomBtn(
+                                      icon: Icons.my_location_rounded,
+                                      onTap: () {
+                                        _autoFollow = true;
+                                        if (_marker != null) {
+                                          _mapController.move(
+                                              _marker!, _coordZoom);
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            // Attribution
+                            const Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: EdgeInsets.only(left: 4, bottom: 2),
+                                child: Text(
+                                    '\u00A9 OpenStreetMap contributors',
+                                    style: TextStyle(
+                                        color: Colors.black54, fontSize: 8)),
+                              ),
+                            ),
+                          ],
+                        ),
+                        // ─── Timestamp overlay (top center) ───
+                        if (_gpsTrack != null && _currentTime.isNotEmpty)
+                          Positioned(
+                            top: 6,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(_currentTime,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.w600)),
                               ),
                             ),
                           ),
-                          // Attribution
-                          const Align(
-                            alignment: Alignment.bottomLeft,
-                            child: Padding(
-                              padding: EdgeInsets.only(left: 4, bottom: 2),
-                              child: Text('\u00A9 OpenStreetMap contributors',
-                                style: TextStyle(
-                                    color: Colors.black54, fontSize: 8)),
-                            ),
-                          ),
-                        ],
-                      ),
+                      ]),
                     ),
                   ],
                 ),
