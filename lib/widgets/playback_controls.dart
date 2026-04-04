@@ -332,7 +332,9 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
           const SizedBox(width: 6),
 
           // Sync toggle
-          GestureDetector(
+          Tooltip(
+            message: 'Sync offset (${sc.label(ShortcutAction.syncToggle)})',
+            child: GestureDetector(
             onTap: () => setState(() => _showSync = !_showSync),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -360,35 +362,36 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
               ]),
             ),
           ),
+          ),
           const SizedBox(width: 6),
 
           // Layout (only when both cameras present)
           if (playback.hasFront && playback.hasBack) ...[
-            GestureDetector(
-              key: widget.layoutBtnKey,
-              onTap: widget.onLayout,
-              child: _Pill(children: [
-                const Icon(Icons.view_quilt_rounded,
-                    size: 14, color: Colors.white54),
-                const SizedBox(width: 4),
-                Text(_layoutLabel(layout.mode),
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 11)),
-              ]),
+            Tooltip(
+              message: 'Change layout (${sc.label(ShortcutAction.layoutPopup)})',
+              child: GestureDetector(
+                key: widget.layoutBtnKey,
+                onTap: widget.onLayout,
+                child: _Pill(children: [
+                  const Icon(Icons.view_quilt_rounded,
+                      size: 14, color: Colors.white54),
+                  const SizedBox(width: 4),
+                  Text(_layoutLabel(layout.mode),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                ]),
+              ),
             ),
             const SizedBox(width: 6),
           ],
 
-          // Volume controls
+          // Volume / mute toggles
           if (playback.hasFront && playback.hasBack) ...[
-            _VolumeBtn(
+            _MuteBtn(
               label: 'F',
-              volume: ref.watch(frontVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(frontVolumeProvider.notifier).state = v;
-                notifier.setFrontVolume(v);
-              },
-              onMuteToggle: () {
+              muted: ref.watch(frontVolumeProvider) <= 0,
+              shortcut: sc.label(ShortcutAction.muteFront),
+              onTap: () {
                 final cur = ref.read(frontVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(frontVolumeProvider.notifier).state = next;
@@ -397,14 +400,11 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
               },
             ),
             const SizedBox(width: 4),
-            _VolumeBtn(
+            _MuteBtn(
               label: 'B',
-              volume: ref.watch(backVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(backVolumeProvider.notifier).state = v;
-                notifier.setBackVolume(v);
-              },
-              onMuteToggle: () {
+              muted: ref.watch(backVolumeProvider) <= 0,
+              shortcut: sc.label(ShortcutAction.muteBack),
+              onTap: () {
                 final cur = ref.read(backVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(backVolumeProvider.notifier).state = next;
@@ -414,14 +414,11 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
             ),
             const SizedBox(width: 6),
           ] else if (playback.hasFront) ...[
-            _VolumeBtn(
+            _MuteBtn(
               label: 'Vol',
-              volume: ref.watch(frontVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(frontVolumeProvider.notifier).state = v;
-                notifier.setFrontVolume(v);
-              },
-              onMuteToggle: () {
+              muted: ref.watch(frontVolumeProvider) <= 0,
+              shortcut: sc.label(ShortcutAction.muteFront),
+              onTap: () {
                 final cur = ref.read(frontVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(frontVolumeProvider.notifier).state = next;
@@ -431,14 +428,11 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
             ),
             const SizedBox(width: 6),
           ] else if (playback.hasBack) ...[
-            _VolumeBtn(
+            _MuteBtn(
               label: 'Vol',
-              volume: ref.watch(backVolumeProvider),
-              onVolumeChanged: (v) {
-                ref.read(backVolumeProvider.notifier).state = v;
-                notifier.setBackVolume(v);
-              },
-              onMuteToggle: () {
+              muted: ref.watch(backVolumeProvider) <= 0,
+              shortcut: sc.label(ShortcutAction.muteBack),
+              onTap: () {
                 final cur = ref.read(backVolumeProvider);
                 final next = cur > 0 ? 0.0 : 100.0;
                 ref.read(backVolumeProvider.notifier).state = next;
@@ -972,145 +966,53 @@ class _SyncPanel extends ConsumerWidget {
   }
 }
 
-// ─── Volume button with popup slider ─────────────────────────────────────────
+// ─── Mute toggle button ─────────────────────────────────────────────────────
 
-class _VolumeBtn extends StatefulWidget {
+class _MuteBtn extends StatelessWidget {
   final String label;
-  final double volume;
-  final ValueChanged<double> onVolumeChanged;
-  final VoidCallback onMuteToggle;
-  const _VolumeBtn({
+  final bool muted;
+  final String shortcut;
+  final VoidCallback onTap;
+  const _MuteBtn({
     required this.label,
-    required this.volume,
-    required this.onVolumeChanged,
-    required this.onMuteToggle,
+    required this.muted,
+    required this.shortcut,
+    required this.onTap,
   });
 
-  @override
-  State<_VolumeBtn> createState() => _VolumeBtnState();
-}
-
-class _VolumeBtnState extends State<_VolumeBtn> {
-  bool _open = false;
-
-  bool get _muted => widget.volume <= 0;
-
   IconData get _icon {
-    if (_muted) return Icons.volume_off_rounded;
-    if (widget.volume < 50) return Icons.volume_down_rounded;
+    if (muted) return Icons.volume_off_rounded;
     return Icons.volume_up_rounded;
   }
 
-  void _toggle() => setState(() => _open = !_open);
-
   @override
   Widget build(BuildContext context) {
-    final button = GestureDetector(
-      onTap: _toggle,
-      onLongPress: widget.onMuteToggle,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: _muted ? Colors.red.withValues(alpha: 0.12) : _pillBg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: _muted
-                ? Colors.red.withValues(alpha: 0.4)
-                : _pillBorder,
+    return Tooltip(
+      message: '${muted ? "Unmute" : "Mute"} $label ($shortcut)',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: muted ? Colors.red.withValues(alpha: 0.12) : _pillBg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: muted
+                  ? Colors.red.withValues(alpha: 0.4)
+                  : _pillBorder,
+            ),
           ),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(_icon,
-              size: 13,
-              color: _muted ? Colors.redAccent : Colors.white54),
-          const SizedBox(width: 4),
-          Text(widget.label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: _muted ? Colors.redAccent : Colors.white54)),
-        ]),
-      ),
-    );
-
-    // Stack with Clip.none lets the popup overflow above without
-    // shifting layout. The non-positioned button child sizes the Stack.
-    return TapRegion(
-      groupId: 'vol_${widget.label}',
-      onTapOutside: (_) {
-        if (_open) setState(() => _open = false);
-      },
-      child: SizedBox(
-        height: 27,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            button,
-            if (_open)
-              Positioned(
-                bottom: 31,
-                left: 0,
-                child: TapRegion(
-                  groupId: 'vol_${widget.label}',
-                  child: Container(
-                  width: 40,
-                  height: 130,
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF161D26),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _pillBorder),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        blurRadius: 12,
-                        offset: const Offset(0, -2),
-                      ),
-                    ],
-                  ),
-                  child: Column(children: [
-                    Text('${widget.volume.round()}',
-                        style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    SizedBox(
-                      height: 96,
-                      child: RotatedBox(
-                        quarterTurns: 3,
-                        child: ExcludeFocus(
-                          child: SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                  enabledThumbRadius: 6),
-                              overlayShape:
-                                  const RoundSliderOverlayShape(
-                                      overlayRadius: 10),
-                              activeTrackColor:
-                                  _muted ? Colors.redAccent : _cyan,
-                              inactiveTrackColor: Colors.white12,
-                              thumbColor:
-                                  _muted ? Colors.redAccent : _cyan,
-                              overlayColor:
-                                  _cyan.withValues(alpha: 0.2),
-                            ),
-                            child: Slider(
-                              value: widget.volume,
-                              min: 0,
-                              max: 100,
-                              onChanged: widget.onVolumeChanged,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-                ),
-              ),
-          ],
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(_icon,
+                size: 13,
+                color: muted ? Colors.redAccent : Colors.white54),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: muted ? Colors.redAccent : Colors.white54)),
+          ]),
         ),
       ),
     );
