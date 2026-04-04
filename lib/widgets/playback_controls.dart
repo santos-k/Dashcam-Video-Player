@@ -51,11 +51,13 @@ class PlaybackControls extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<PlaybackControls> createState() => _PlaybackControlsState();
+  ConsumerState<PlaybackControls> createState() => PlaybackControlsState();
 }
 
-class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
+class PlaybackControlsState extends ConsumerState<PlaybackControls> {
   bool _showSync = false;
+
+  void toggleSync() => setState(() => _showSync = !_showSync);
 
   @override
   Widget build(BuildContext context) {
@@ -1048,7 +1050,9 @@ class _VolumeBtnState extends State<_VolumeBtn> {
               Positioned(
                 bottom: 31,
                 left: 0,
-                child: Container(
+                child: TapRegion(
+                  groupId: 'vol_${widget.label}',
+                  child: Container(
                   width: 40,
                   height: 130,
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1103,6 +1107,7 @@ class _VolumeBtnState extends State<_VolumeBtn> {
                       ),
                     ),
                   ]),
+                ),
                 ),
               ),
           ],

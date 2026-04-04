@@ -48,6 +48,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
   final GlobalKey<DualVideoViewState> _videoViewKey = GlobalKey<DualVideoViewState>();
+  final GlobalKey<PlaybackControlsState> _controlsKey = GlobalKey<PlaybackControlsState>();
 
   @override
   void initState() {
@@ -268,10 +269,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         if (!playback.isLoaded) return;
         ref.read(playbackSpeedProvider.notifier).state = 1.0;
         notifier.setSpeed(1.0);
+      case ShortcutAction.syncToggle:
+        _controlsKey.currentState?.toggleSync();
       case ShortcutAction.layoutSideBySide:
         if (!playback.hasFront || !playback.hasBack) return;
+        final sbsConfig = ref.read(layoutConfigProvider);
+        final nextMode = sbsConfig.mode == LayoutMode.sideBySide
+            ? LayoutMode.stacked
+            : LayoutMode.sideBySide;
         ref.read(layoutConfigProvider.notifier).state =
-            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.sideBySide);
+            sbsConfig.copyWith(mode: nextMode);
       case ShortcutAction.layoutStacked:
         if (!playback.hasFront || !playback.hasBack) return;
         ref.read(layoutConfigProvider.notifier).state =
@@ -981,6 +988,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             duration: const Duration(milliseconds: 200),
             child: _overlayVisible
                 ? PlaybackControls(
+                    key: _controlsKey,
                     onPrevious:     () => _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true),
                     onNext:         () => _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true),
                     onFolder:       _pickFolder,
