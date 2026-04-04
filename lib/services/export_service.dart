@@ -318,6 +318,56 @@ class ExportService {
     }
   }
 
+  /// Extract the first GPS timestamp from a .ts file.
+  /// Returns the DateTime parsed from the embedded GPS text, or null.
+  static Future<DateTime?> extractFirstGpsTime(String videoPath) async {
+    final file = File(videoPath);
+    if (!await file.exists()) return null;
+    final fileSize = await file.length();
+
+    try {
+      final readSize = fileSize < 4 * 1024 * 1024 ? fileSize : 4 * 1024 * 1024;
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        await raf.setPosition(fileSize - readSize);
+        final bytes = await raf.read(readSize);
+        final text = String.fromCharCodes(
+          bytes.where((b) => b >= 0x20 && b < 0x7F || b == 0x0A || b == 0x0D),
+        );
+
+        final match = RegExp(
+          r'(\d{4})/(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2})\s+[NS]:\d+\.\d+',
+        ).firstMatch(text);
+        if (match == null) return null;
+
+        return DateTime(
+          int.parse(match.group(1)!), int.parse(match.group(2)!),
+          int.parse(match.group(3)!), int.parse(match.group(4)!),
+          int.parse(match.group(5)!), int.parse(match.group(6)!),
+        );
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Compute sync offset (in ms) between front and back .ts files
+  /// using their embedded GPS timestamps.
+  /// Positive = back is ahead (seek back forward), negative = front is ahead.
+  static Future<int> computeGpsSyncOffset(
+      String frontPath, String backPath) async {
+    final results = await Future.wait([
+      extractFirstGpsTime(frontPath),
+      extractFirstGpsTime(backPath),
+    ]);
+    final frontTime = results[0];
+    final backTime = results[1];
+    if (frontTime == null || backTime == null) return 0;
+    return frontTime.difference(backTime).inMilliseconds;
+  }
+
   /// Use ffprobe to get video duration.
   static Future<Duration> _probeDuration(String ffmpeg, String videoPath) async {
     final exeDir     = File(ffmpeg).parent.path;

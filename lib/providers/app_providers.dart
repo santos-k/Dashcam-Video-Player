@@ -184,11 +184,15 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       debugPrint('media_kit open error: $e');
     }
 
-    // Apply sync offset
-    if (offset > 0 && pair.hasBack) {
-      await _backPlayer.seek(Duration(milliseconds: offset));
-    } else if (offset < 0 && pair.hasFront) {
-      await _frontPlayer.seek(Duration(milliseconds: -offset));
+    // Apply sync offset — wait briefly for players to be ready after open
+    if (offset != 0) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (offset > 0 && pair.hasBack) {
+        await _backPlayer.seek(Duration(milliseconds: offset));
+      } else if (offset < 0 && pair.hasFront) {
+        await _frontPlayer.seek(Duration(milliseconds: -offset));
+      }
+      appLog('Playback', 'Sync offset applied: ${offset}ms');
     }
 
     state = PlaybackState(

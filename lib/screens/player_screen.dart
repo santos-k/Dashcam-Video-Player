@@ -387,21 +387,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     });
   }
 
-  void _goTo(int index, {bool autoPlay = true}) {
+  Future<void> _goTo(int index, {bool autoPlay = true}) async {
     final pairs = ref.read(videoPairListProvider);
     if (index < 0 || index >= pairs.length) return;
     appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     final speed = ref.read(playbackSpeedProvider);
-    ref.read(playbackProvider.notifier)
-        .loadPair(pairs[index], 0, autoPlay: autoPlay)
-        .then((_) {
-      // Re-apply current speed to the new clip
-      if (speed != 1.0) {
-        ref.read(playbackProvider.notifier).setSpeed(speed);
+    final pair = pairs[index];
+
+    // Compute sync offset: try GPS timestamps first, fall back to filename offset
+    int syncOffset = pair.syncOffsetMs; // filename-based default
+    if (pair.isPaired &&
+        pair.frontPath != null && pair.frontPath!.toLowerCase().endsWith('.ts') &&
+        pair.backPath != null && pair.backPath!.toLowerCase().endsWith('.ts')) {
+      final gpsOffset = await ExportService.computeGpsSyncOffset(
+          pair.frontPath!, pair.backPath!);
+      if (gpsOffset != 0) {
+        syncOffset = gpsOffset;
+        appLog('Playback', 'GPS sync offset: ${gpsOffset}ms');
       }
-    });
+    }
+    if (syncOffset != 0) {
+      ref.read(syncOffsetProvider.notifier).state = syncOffset;
+    }
+
+    await ref.read(playbackProvider.notifier)
+        .loadPair(pair, syncOffset, autoPlay: autoPlay);
+
+    if (speed != 1.0) {
+      ref.read(playbackProvider.notifier).setSpeed(speed);
+    }
   }
 
   void _onClipEnd() {
