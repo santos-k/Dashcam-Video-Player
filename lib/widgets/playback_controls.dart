@@ -1,6 +1,5 @@
 // lib/widgets/playback_controls.dart
 
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -990,9 +989,7 @@ class _VolumeBtn extends StatefulWidget {
 }
 
 class _VolumeBtnState extends State<_VolumeBtn> {
-  bool _showSlider = false;
-  // Timer prevents popup from closing while mouse travels from button to popup
-  Timer? _hideTimer;
+  bool _open = false;
 
   bool get _muted => widget.volume <= 0;
 
@@ -1002,73 +999,59 @@ class _VolumeBtnState extends State<_VolumeBtn> {
     return Icons.volume_up_rounded;
   }
 
-  void _show() {
-    _hideTimer?.cancel();
-    if (!_showSlider) setState(() => _showSlider = true);
-  }
-
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(milliseconds: 250), () {
-      if (mounted) setState(() => _showSlider = false);
-    });
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    super.dispose();
-  }
+  void _toggle() => setState(() => _open = !_open);
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => _show(),
-      onExit: (_) => _scheduleHide(),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // Mute/unmute icon button
-          GestureDetector(
-            onTap: widget.onMuteToggle,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-              decoration: BoxDecoration(
-                color: _muted
-                    ? Colors.red.withValues(alpha: 0.12)
-                    : _pillBg,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _muted
-                      ? Colors.red.withValues(alpha: 0.4)
-                      : _pillBorder,
-                ),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(_icon,
-                    size: 13,
-                    color: _muted ? Colors.redAccent : Colors.white54),
-                const SizedBox(width: 4),
-                Text(widget.label,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _muted ? Colors.redAccent : Colors.white54)),
-              ]),
-            ),
+    final button = GestureDetector(
+      onTap: _toggle,
+      onLongPress: widget.onMuteToggle,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: _muted ? Colors.red.withValues(alpha: 0.12) : _pillBg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _muted
+                ? Colors.red.withValues(alpha: 0.4)
+                : _pillBorder,
           ),
-          // Vertical slider popup
-          if (_showSlider)
-            Positioned(
-              bottom: 28,
-              left: -2,
-              child: MouseRegion(
-                onEnter: (_) => _show(),
-                onExit: (_) => _scheduleHide(),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(_icon,
+              size: 13,
+              color: _muted ? Colors.redAccent : Colors.white54),
+          const SizedBox(width: 4),
+          Text(widget.label,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: _muted ? Colors.redAccent : Colors.white54)),
+        ]),
+      ),
+    );
+
+    // Stack with Clip.none lets the popup overflow above without
+    // shifting layout. The non-positioned button child sizes the Stack.
+    return TapRegion(
+      groupId: 'vol_${widget.label}',
+      onTapOutside: (_) {
+        if (_open) setState(() => _open = false);
+      },
+      child: SizedBox(
+        height: 27,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            button,
+            if (_open)
+              Positioned(
+                bottom: 31,
+                left: 0,
                 child: Container(
                   width: 40,
                   height: 130,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
                     color: const Color(0xFF161D26),
                     borderRadius: BorderRadius.circular(8),
@@ -1081,33 +1064,40 @@ class _VolumeBtnState extends State<_VolumeBtn> {
                       ),
                     ],
                   ),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  child: Column(children: [
                     Text('${widget.volume.round()}',
                         style: const TextStyle(
                             color: Colors.white54,
                             fontSize: 9,
                             fontWeight: FontWeight.w600)),
-                    Expanded(
+                    const SizedBox(height: 2),
+                    SizedBox(
+                      height: 96,
                       child: RotatedBox(
                         quarterTurns: 3,
-                        child: SliderTheme(
-                          data: SliderThemeData(
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6),
-                            overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 10),
-                            activeTrackColor:
-                                _muted ? Colors.redAccent : _cyan,
-                            inactiveTrackColor: Colors.white12,
-                            thumbColor: _muted ? Colors.redAccent : _cyan,
-                            overlayColor: _cyan.withValues(alpha: 0.2),
-                          ),
-                          child: Slider(
-                            value: widget.volume,
-                            min: 0,
-                            max: 100,
-                            onChanged: widget.onVolumeChanged,
+                        child: ExcludeFocus(
+                          child: SliderTheme(
+                            data: SliderThemeData(
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(
+                                  enabledThumbRadius: 6),
+                              overlayShape:
+                                  const RoundSliderOverlayShape(
+                                      overlayRadius: 10),
+                              activeTrackColor:
+                                  _muted ? Colors.redAccent : _cyan,
+                              inactiveTrackColor: Colors.white12,
+                              thumbColor:
+                                  _muted ? Colors.redAccent : _cyan,
+                              overlayColor:
+                                  _cyan.withValues(alpha: 0.2),
+                            ),
+                            child: Slider(
+                              value: widget.volume,
+                              min: 0,
+                              max: 100,
+                              onChanged: widget.onVolumeChanged,
+                            ),
                           ),
                         ),
                       ),
@@ -1115,8 +1105,8 @@ class _VolumeBtnState extends State<_VolumeBtn> {
                   ]),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

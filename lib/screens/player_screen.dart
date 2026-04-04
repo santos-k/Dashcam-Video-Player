@@ -290,12 +290,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         }
       case ShortcutAction.layoutFrontOnly:
         if (!playback.hasFront || !playback.hasBack) return;
-        ref.read(layoutConfigProvider.notifier).state =
-            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.frontOnly);
+        final soloConfig = ref.read(layoutConfigProvider);
+        if (soloConfig.mode == LayoutMode.frontOnly) {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig.copyWith(mode: LayoutMode.backOnly);
+        } else {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig.copyWith(mode: LayoutMode.frontOnly);
+        }
       case ShortcutAction.layoutBackOnly:
         if (!playback.hasFront || !playback.hasBack) return;
-        ref.read(layoutConfigProvider.notifier).state =
-            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.backOnly);
+        final soloConfig2 = ref.read(layoutConfigProvider);
+        if (soloConfig2.mode == LayoutMode.backOnly) {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig2.copyWith(mode: LayoutMode.frontOnly);
+        } else {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig2.copyWith(mode: LayoutMode.backOnly);
+        }
       case ShortcutAction.layoutPopup:
         if (!playback.hasFront || !playback.hasBack) return;
         _showLayoutPopup();
