@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:path/path.dart' as p;
 import '../models/dashcam_file.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
@@ -92,6 +93,26 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
   void clearDashcamPairs() {
     _raw.removeWhere((p) => p.isRemote);
     state = List.of(_raw);
+  }
+
+  /// Load individual video files as standalone clips (from drag & drop or
+  /// file association). Each file becomes a front-only VideoPair.
+  void loadFiles(List<File> files) {
+    final pairs = files.map((f) {
+      final name = p.basenameWithoutExtension(f.path);
+      DateTime ts;
+      try { ts = f.lastModifiedSync(); } catch (_) { ts = DateTime.now(); }
+      return VideoPair(
+        id: name,
+        frontFile: f,
+        timestamp: ts,
+      );
+    }).toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    appLog('Files', 'Loaded ${pairs.length} individual video files');
+    _raw  = pairs;
+    state = pairs;
   }
 
   void clear() {

@@ -6,14 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:intl/intl.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import '../main.dart' show launchArgs;
 import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
 import '../services/dashcam_service.dart';
+import '../utils/file_pairer.dart';
 import '../widgets/app_notification.dart';
 import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
@@ -43,6 +46,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
   bool _aboutOpen           = false;   // track About popup for toggle
   bool _dashcamOpen         = false;   // dashcam Wi-Fi overlay
+  bool _isDragging          = false;   // file drag hover state
   Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -63,6 +67,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         cache[id] = dur;
         ref.read(clipDurationCacheProvider.notifier).state = cache;
       };
+      // Handle file/folder passed via command-line (file association / "Open with")
+      if (launchArgs.isNotEmpty) {
+        _openPaths(launchArgs);
+      }
     });
   }
 
@@ -439,19 +447,70 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _focusNode.requestFocus();
       return;
     }
+    await _openPaths([result]);
+  }
+
+  Future<void> _pickFile() async {
+    appLog('File', 'Opening file picker');
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Select video file(s)',
+      type: FileType.custom,
+      allowedExtensions: [
+        'mp4', 'mov', 'avi', 'mkv', 'ts', 'webm', 'flv',
+        'wmv', 'm4v', '3gp', 'mts', 'm2ts', 'vob', 'ogv',
+        'mpg', 'mpeg', 'divx', 'f4v', 'asf',
+      ],
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) {
+      _focusNode.requestFocus();
+      return;
+    }
+    final paths = result.files
+        .where((f) => f.path != null)
+        .map((f) => f.path!)
+        .toList();
+    await _openPaths(paths);
+  }
+
+  /// Shared handler for opening files/folders from any source:
+  /// folder picker, drag & drop, or command-line arguments.
+  Future<void> _openPaths(List<String> paths) async {
+    if (paths.isEmpty) return;
 
     if (mounted) {
       _showNotification(context, 'Scanning for dashcam videos...',
           icon: Icons.search_rounded, type: NotificationType.warning);
     }
 
-    appLog('Folder', 'Scanning: $result');
-    await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(result));
+    final firstPath = paths.first;
+    final isDir = FileSystemEntity.isDirectorySync(firstPath);
+
+    if (isDir) {
+      appLog('Folder', 'Scanning: $firstPath');
+      await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(firstPath));
+    } else {
+      // Filter to supported video files
+      final videoFiles = paths
+          .where((p) => FileSystemEntity.isFileSync(p) && FilePairer.isVideoFile(p))
+          .map((p) => File(p))
+          .toList();
+      if (videoFiles.isEmpty) {
+        if (mounted) {
+          _showNotification(context, 'No supported video files found',
+              type: NotificationType.warning);
+        }
+        _focusNode.requestFocus();
+        return;
+      }
+      appLog('Files', 'Loading ${videoFiles.length} video file(s)');
+      ref.read(videoPairListProvider.notifier).loadFiles(videoFiles);
+    }
 
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) {
       if (mounted) {
-        _showNotification(context, 'No dashcam videos found in $result',
+        _showNotification(context, 'No dashcam videos found in $firstPath',
             type: NotificationType.warning);
       }
       _focusNode.requestFocus();
@@ -1031,7 +1090,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ─── Landing page (no clips loaded) ─────────────────────────────────────────
 
   Widget _buildLandingBody() {
-    return Row(
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _isDragging = true),
+      onDragExited:  (_) => setState(() => _isDragging = false),
+      onDragDone: (details) {
+        setState(() => _isDragging = false);
+        final paths = details.files.map((f) => f.path).toList();
+        _openPaths(paths);
+      },
+      child: Row(
       children: [
         // ─── Left Sidebar ───
         Container(
@@ -1161,19 +1228,25 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                         ),
                         const SizedBox(height: 48),
                         // Download icon in bordered box
-                        Container(
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
                           width: 72,
                           height: 72,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: const Color(0xFF4FC3F7).withValues(alpha: 0.3),
-                              width: 1.5,
+                              color: _isDragging
+                                  ? const Color(0xFF4FC3F7)
+                                  : const Color(0xFF4FC3F7).withValues(alpha: 0.3),
+                              width: _isDragging ? 2.0 : 1.5,
                             ),
-                            color: const Color(0xFF4FC3F7).withValues(alpha: 0.06),
+                            color: _isDragging
+                                ? const Color(0xFF4FC3F7).withValues(alpha: 0.15)
+                                : const Color(0xFF4FC3F7).withValues(alpha: 0.06),
                           ),
-                          child: const Icon(Icons.download_rounded,
-                              color: Color(0xFF4FC3F7), size: 32),
+                          child: Icon(
+                            _isDragging ? Icons.file_download_rounded : Icons.download_rounded,
+                            color: const Color(0xFF4FC3F7), size: 32),
                         ),
                         const SizedBox(height: 28),
                         // Open Dashcam Folder button
@@ -1195,14 +1268,57 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                                 const Color(0xFF4FC3F7).withValues(alpha: 0.3),
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _pickFile,
+                          icon: const Icon(Icons.video_file_outlined, size: 18),
+                          label: const Text('Open Video File',
+                              style: TextStyle(fontSize: 14,
+                                  fontWeight: FontWeight.w500)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF4FC3F7),
+                            side: BorderSide(
+                                color: const Color(0xFF4FC3F7).withValues(alpha: 0.4)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 28, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
                         const SizedBox(height: 14),
-                        Text('or Drag & Drop videos here',
-                            style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.35),
-                                fontSize: 13)),
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: _isDragging
+                                ? const Color(0xFF4FC3F7)
+                                : Colors.white.withValues(alpha: 0.35),
+                            fontSize: 13,
+                            fontWeight: _isDragging ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                          child: Text(_isDragging
+                              ? 'Drop to open'
+                              : 'or Drag & Drop videos here'),
+                        ),
                       ],
                     ),
                   ),
+                  // Drag overlay border
+                  if (_isDragging)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          margin: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: const Color(0xFF4FC3F7).withValues(alpha: 0.5),
+                              width: 2,
+                            ),
+                            color: const Color(0xFF4FC3F7).withValues(alpha: 0.04),
+                          ),
+                        ),
+                      ),
+                    ),
                 ]),
               ),
             ),
@@ -1320,6 +1436,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ]),
         ),
       ],
+    ),
     );
   }
 

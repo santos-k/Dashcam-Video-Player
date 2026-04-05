@@ -41,6 +41,42 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
+[Registry]
+; Register file type class for Dashcam Player
+Root: HKA; Subkey: "Software\Classes\DashcamPlayer.VideoFile"; ValueType: string; ValueName: ""; ValueData: "Dashcam Player Video"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\DashcamPlayer.VideoFile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\DashcamPlayer.VideoFile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+
+; Register as an "Open with" option for common video formats
+Root: HKA; Subkey: "Software\Classes\.mp4\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mkv\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.avi\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.ts\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mov\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.wmv\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.flv\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.webm\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.m4v\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mpg\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mpeg\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mts\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.m2ts\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.3gp\OpenWithProgids"; ValueType: string; ValueName: "DashcamPlayer.VideoFile"; ValueData: ""; Flags: uninsdeletevalue
+
+; "Open with Dashcam Player" in folder right-click context menu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\DashcamPlayer"; ValueType: string; ValueName: ""; ValueData: "Open with {#AppName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Directory\shell\DashcamPlayer"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\Directory\shell\DashcamPlayer\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+
+; "Open with Dashcam Player" in drive right-click context menu
+Root: HKA; Subkey: "Software\Classes\Drive\shell\DashcamPlayer"; ValueType: string; ValueName: ""; ValueData: "Open with {#AppName}"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Drive\shell\DashcamPlayer"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\Drive\shell\DashcamPlayer\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+
+; Register app capabilities for Windows "Default Apps" / "Open with" dialog
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExeName}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExeName}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"
+
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

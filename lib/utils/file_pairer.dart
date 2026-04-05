@@ -22,6 +22,12 @@ class FilePairer {
   };
   static const _toleranceSeconds = 5;
 
+  /// Check if a file path has a supported video extension.
+  static bool isVideoFile(String path) {
+    final ext = path.contains('.') ? '.${path.split('.').last.toLowerCase()}' : '';
+    return _videoExtensions.contains(ext);
+  }
+
   /// Main entry: scans root directory recursively and returns all video pairs.
   /// Detects dashcam structure, pairs front/back, includes other videos.
   static Future<List<VideoPair>> pairFromRoot(Directory root) async {
