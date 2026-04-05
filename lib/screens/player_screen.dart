@@ -1452,9 +1452,19 @@ class _MinimalTopBar extends ConsumerWidget {
     this.onDashcam,
   });
 
+  static String _extractFileName(String? path) {
+    if (path == null || path.isEmpty) return '';
+    final sep = path.contains('\\') ? '\\' : '/';
+    return path.split(sep).last;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sc = ref.watch(shortcutConfigProvider);
+    final currentPair = ref.watch(currentPairProvider);
+    final currentFileName = currentPair != null
+        ? _extractFileName(currentPair.frontPath ?? currentPair.backPath)
+        : '';
 
     return Container(
       color: const Color(0xCC000000),
@@ -1484,6 +1494,16 @@ class _MinimalTopBar extends ConsumerWidget {
             ),
             child: Text('$clipCount clips',
               style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 10)),
+          ),
+        ],
+        if (currentFileName.isNotEmpty) ...[
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(currentFileName,
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
           ),
         ],
         const Spacer(),
