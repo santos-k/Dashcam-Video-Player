@@ -331,7 +331,8 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ]),
           const SizedBox(width: 6),
 
-          // Sync toggle
+          // Sync toggle (only for paired videos)
+          if (playback.hasFront && playback.hasBack) ...[
           Tooltip(
             message: 'Sync offset (${sc.label(ShortcutAction.syncToggle)})',
             child: GestureDetector(
@@ -364,6 +365,7 @@ class PlaybackControlsState extends ConsumerState<PlaybackControls> {
           ),
           ),
           const SizedBox(width: 6),
+          ],
 
           // Layout (only when both cameras present)
           if (playback.hasFront && playback.hasBack) ...[
