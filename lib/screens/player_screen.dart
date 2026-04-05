@@ -486,14 +486,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _toggleMapSidebar() {
-    if (_mapSidebarOpen) {
-      appLog('Shortcut', 'M – close map sidebar');
-      Navigator.of(context).maybePop();
-      _focusNode.requestFocus();
-    } else {
-      appLog('Shortcut', 'M – open map sidebar');
-      _scaffoldKey.currentState?.openEndDrawer();
-    }
+    setState(() {
+      _mapSidebarOpen = !_mapSidebarOpen;
+      appLog('Shortcut', 'M – ${_mapSidebarOpen ? "open" : "close"} map overlay');
+    });
   }
 
   void _showLayoutPopup() {
@@ -916,7 +912,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         key: _scaffoldKey,
         backgroundColor: Colors.black,
         onEndDrawerChanged: (open) {
-          _mapSidebarOpen = open;
           if (!open) _focusNode.requestFocus();
         },
         drawer: pairs.isNotEmpty ? ClipListDrawer(
@@ -926,10 +921,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           onSave:   _saveFromDrawer,
           onDelete:  _deleteFromDrawer,
         ) : null,
-        endDrawer: pairs.isNotEmpty ? MapSidebar(
-          videoPath: mapVideoPath,
-          onClose: () => _focusNode.requestFocus(),
-        ) : null,
+        endDrawer: null,
         body: pairs.isEmpty
           ? _buildLandingBody()
           : MouseRegion(
@@ -963,7 +955,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 }
               },
               child: Stack(children: [
-                DualVideoView(key: _videoViewKey),
+                Row(children: [
+                  Expanded(child: DualVideoView(key: _videoViewKey)),
+                  if (_mapSidebarOpen)
+                    MapPanel(
+                      videoPath: mapVideoPath,
+                      onClose: () {
+                        setState(() => _mapSidebarOpen = false);
+                        _focusNode.requestFocus();
+                      },
+                    ),
+                ]),
                 // About overlay — rendered in-widget so I key toggle works
                 if (_aboutOpen)
                   GestureDetector(
