@@ -1473,80 +1473,79 @@ class _MinimalTopBar extends ConsumerWidget {
         left: 4, right: 4, bottom: 2,
       ),
       child: Row(children: [
-        Builder(
-          builder: (ctx) => IconButton(
-            icon:    const Icon(Icons.menu_rounded, color: Colors.white60),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-            tooltip: 'Clip list (${sc.label(ShortcutAction.clipList)})',
-            iconSize: 20,
-          ),
+        // Left: menu + title + badge + filename (takes remaining space)
+        Expanded(
+          child: Row(children: [
+            Builder(
+              builder: (ctx) => IconButton(
+                icon: const Icon(Icons.menu_rounded, color: Colors.white60),
+                onPressed: () => Scaffold.of(ctx).openDrawer(),
+                tooltip: 'Clip list (${sc.label(ShortcutAction.clipList)})',
+                iconSize: 20,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Text('DashCam Player',
+              style: TextStyle(color: Colors.white70, fontSize: 14,
+                  fontWeight: FontWeight.w600)),
+            if (clipCount > 0) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('$clipCount clips',
+                  style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 10)),
+              ),
+            ],
+            if (currentFileName.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(currentFileName,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ]),
         ),
-        const Text('DashCam Player',
-          style: TextStyle(color: Colors.white70, fontSize: 14,
-              fontWeight: FontWeight.w600)),
-        if (clipCount > 0) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text('$clipCount clips',
-              style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 10)),
-          ),
-        ],
-        if (currentFileName.isNotEmpty) ...[
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(currentFileName,
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ),
-        ],
-        const Spacer(),
+        // Right: action icons (fixed, always top-right)
         _DashcamStatusBtn(onTap: onDashcam),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: 'Keyboard shortcuts',
-          child: IconButton(
-            icon: const Icon(Icons.keyboard_rounded, color: Colors.white38),
-            onPressed: onShortcutSettings,
-            iconSize: 18,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+        IconButton(
+          icon: const Icon(Icons.keyboard_rounded, color: Colors.white38),
+          onPressed: onShortcutSettings,
+          tooltip: 'Keyboard shortcuts',
+          iconSize: 18,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: 'About (${sc.label(ShortcutAction.about)})',
-          child: IconButton(
-            icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
-            onPressed: onAbout,
-            iconSize: 18,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+        IconButton(
+          icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
+          onPressed: onAbout,
+          tooltip: 'About (${sc.label(ShortcutAction.about)})',
+          iconSize: 18,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: isFullscreen
+        IconButton(
+          icon: Icon(
+            isFullscreen
+                ? Icons.fullscreen_exit_rounded
+                : Icons.fullscreen_rounded,
+            color: Colors.white54,
+          ),
+          onPressed: onToggleFullscreen,
+          tooltip: isFullscreen
               ? 'Exit fullscreen (${sc.label(ShortcutAction.fullscreen)})'
               : 'Fullscreen (${sc.label(ShortcutAction.fullscreen)})',
-          child: IconButton(
-            icon: Icon(
-              isFullscreen
-                  ? Icons.fullscreen_exit_rounded
-                  : Icons.fullscreen_rounded,
-              color: Colors.white54,
-            ),
-            onPressed: onToggleFullscreen,
-            iconSize: 20,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+          iconSize: 20,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
         const SizedBox(width: 4),
       ]),
