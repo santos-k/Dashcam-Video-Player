@@ -78,19 +78,22 @@ class ThumbnailService {
 
     await _acquireSlot();
     try {
-      final result = await Process.run(ffmpeg, [
-        '-ss', '1',            // seek BEFORE input (fast keyframe seek)
-        '-i', videoPath,
-        '-vframes', '1',
-        '-vf', 'scale=180:-1', // 180px wide
-        '-q:v', '6',           // fast JPEG quality
-        '-y',
-        thumbPath,
-      ]);
+      // Try at 1s first, fallback to 0s for short videos
+      for (final ss in ['1', '0']) {
+        final result = await Process.run(ffmpeg, [
+          '-ss', ss,
+          '-i', videoPath,
+          '-vframes', '1',
+          '-vf', 'scale=180:-1',
+          '-q:v', '6',
+          '-y',
+          thumbPath,
+        ]);
 
-      if (result.exitCode == 0 && File(thumbPath).existsSync()) {
-        _memCache[videoPath] = thumbPath;
-        return thumbPath;
+        if (result.exitCode == 0 && File(thumbPath).existsSync()) {
+          _memCache[videoPath] = thumbPath;
+          return thumbPath;
+        }
       }
     } catch (e) {
       debugPrint('Thumbnail generation failed: $e');

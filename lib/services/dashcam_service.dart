@@ -1,93 +1,98 @@
 // lib/services/dashcam_service.dart
+//
+// HTTP REST API client for Onelap Wi-Fi dashcam.
+// Base: http://192.168.169.1/app/*  (all GET, JSON responses)
+// Discovered via Packet Capture Pro HAR analysis.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../models/dashcam_file.dart';
 import '../models/dashcam_state.dart';
 
-/// HTTP API client for Novatek CARDV-based dashcams (e.g. Onelap).
-/// All communication is via HTTP GET to 192.168.1.254.
 class DashcamService {
   DashcamService._();
 
-  /// Configurable IP — defaults to common Novatek dashcam address.
-  static String ip = '192.168.1.254';
+  /// Configurable IP — defaults to Onelap dashcam address.
+  static String ip = '192.168.169.1';
   static String get baseUrl => 'http://$ip';
 
   static const Duration _cmdTimeout = Duration(seconds: 5);
   static const Duration _downloadTimeout = Duration(seconds: 120);
+  static const Duration _thumbTimeout = Duration(seconds: 8);
 
-  // ── Low-level command ──────────────────────────────────────────────────
+  // ── Low-level helpers ─────────────────────────────────────────────────
 
-  /// Send a command and return the raw XML response body.
-  static Future<String> _sendCommand(int cmd, {int? par, String? str}) async {
-    var url = '$baseUrl/?custom=1&cmd=$cmd';
-    if (par != null) url += '&par=$par';
-    if (str != null) url += '&str=${Uri.encodeComponent(str)}';
-
-    debugPrint('DashcamService CMD → $url');
+  /// GET a JSON endpoint under /app/ and return parsed body.
+  /// Throws on network error or non-200 status.
+  static Future<Map<String, dynamic>> _getJson(String path) async {
+    final url = '$baseUrl/app/$path';
+    debugPrint('DashcamService → GET $url');
     final client = HttpClient()..connectionTimeout = _cmdTimeout;
     try {
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close().timeout(_cmdTimeout);
-      final body = await response.transform(utf8.decoder).join();
-      debugPrint('DashcamService RSP ← [${response.statusCode}] ${body.length > 500 ? '${body.substring(0, 500)}...' : body}');
-      return body;
+      final raw = await response.transform(utf8.decoder).join();
+      debugPrint('DashcamService ← [${response.statusCode}] '
+          '${raw.length > 500 ? '${raw.substring(0, 500)}…' : raw}');
+
+      // The dashcam sometimes prepends HTTP headers in the body text
+      // (e.g. "Content-Length: 31\nConnection: close\n\n{...}")
+      // Extract the JSON portion.
+      final jsonStr = _extractJson(raw);
+      return jsonDecode(jsonStr) as Map<String, dynamic>;
     } finally {
       client.close(force: true);
     }
   }
 
-  /// Fetch a raw URL and return the response body. For debugging/probing.
-  static Future<String> fetchRaw(String url) async {
-    debugPrint('DashcamService RAW → $url');
-    final client = HttpClient()..connectionTimeout = _cmdTimeout;
+  /// Extract the first JSON object from a response that may contain
+  /// inline HTTP headers before the actual JSON body.
+  static String _extractJson(String raw) {
+    final idx = raw.indexOf('{');
+    if (idx < 0) return raw;
+    return raw.substring(idx);
+  }
+
+  /// Check result field — returns true if result == 0 (success).
+  static bool _isOk(Map<String, dynamic> json) => json['result'] == 0;
+
+  /// Fetch a raw URL and return bytes (for thumbnails / file downloads).
+  static Future<Uint8List> _getBytes(String url,
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    final client = HttpClient()..connectionTimeout = timeout;
     try {
       final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close().timeout(_cmdTimeout);
-      final body = await response.transform(utf8.decoder).join();
-      debugPrint('DashcamService RAW ← [${response.statusCode}] ${body.length > 1000 ? '${body.substring(0, 1000)}...' : body}');
-      return body;
+      final response = await request.close().timeout(timeout);
+      return await consolidateHttpClientResponseBytes(response);
     } finally {
       client.close(force: true);
     }
-  }
-
-  /// Extract <Status> value from XML response. Returns 0 on success.
-  static int _parseStatus(String xml) {
-    final m = RegExp(r'<Status>(-?\d+)</Status>').firstMatch(xml);
-    return int.tryParse(m?.group(1) ?? '-1') ?? -1;
   }
 
   // ── Connection ─────────────────────────────────────────────────────────
 
-  /// Check if dashcam is reachable at the current IP. Returns true on success.
+  /// Check if dashcam is reachable. Uses getdeviceattr as a ping.
   static Future<bool> checkConnection() async {
     try {
-      final xml = await _sendCommand(3016);
-      return _parseStatus(xml) == 0;
+      final json = await _getJson('getdeviceattr');
+      return _isOk(json);
     } catch (_) {
       return false;
     }
   }
 
-  /// Try to reach a specific IP with the dashcam heartbeat command.
+  /// Try to reach a specific IP.
   static Future<bool> _probeIp(String testIp) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 2);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
-      // Try heartbeat command first
-      final url = 'http://$testIp/?custom=1&cmd=3016';
+      final url = 'http://$testIp/app/getdeviceattr';
       final req = await client.getUrl(Uri.parse(url));
       final res = await req.close().timeout(const Duration(seconds: 2));
-      final body = await res.transform(utf8.decoder).join();
-      if (body.contains('Status') || res.statusCode == 200) return true;
+      if (res.statusCode == 200) return true;
     } catch (_) {}
     try {
-      // Fallback: just see if HTTP server responds at all
       final req = await client.getUrl(Uri.parse('http://$testIp/'));
       final res = await req.close().timeout(const Duration(seconds: 2));
       if (res.statusCode >= 200 && res.statusCode < 500) return true;
@@ -97,12 +102,9 @@ class DashcamService {
   }
 
   /// Auto-discover the dashcam by scanning common IPs and the gateway.
-  /// Returns the working IP or null if not found.
-  /// [onStatus] is called with progress messages for the UI.
   static Future<String?> autoDiscover({
     void Function(String message)? onStatus,
   }) async {
-    // 1. Detect the current gateway IP from network interfaces
     final gatewayIps = <String>{};
     try {
       final interfaces = await NetworkInterface.list(
@@ -110,7 +112,6 @@ class DashcamService {
       );
       for (final iface in interfaces) {
         for (final addr in iface.addresses) {
-          // Derive likely gateway: x.x.x.1 and x.x.x.254
           final parts = addr.address.split('.');
           if (parts.length == 4) {
             gatewayIps.add('${parts[0]}.${parts[1]}.${parts[2]}.1');
@@ -120,25 +121,23 @@ class DashcamService {
       }
     } catch (_) {}
 
-    // 2. Build candidate list: common dashcam IPs + detected gateways
     final candidates = <String>{
-      '192.168.1.254',    // Novatek default
-      '192.168.0.1',      // Some models
-      '192.168.1.1',      // Some models
-      '192.168.42.1',     // Some models
-      '192.168.43.1',     // Android hotspot style
-      '10.0.0.1',         // Rare
+      '192.168.169.1', // Onelap default
+      '192.168.1.254', // Novatek fallback
+      '192.168.0.1',
+      '192.168.1.1',
+      '192.168.42.1',
+      '192.168.43.1',
       ...gatewayIps,
     };
 
-    onStatus?.call('Scanning ${candidates.length} addresses...');
+    onStatus?.call('Scanning ${candidates.length} addresses…');
     debugPrint('DashcamService: auto-discover candidates: $candidates');
 
-    // 3. Probe all candidates in parallel with short timeout
     final futures = <Future<String?>>[];
     for (final candidate in candidates) {
       futures.add(() async {
-        onStatus?.call('Trying $candidate...');
+        onStatus?.call('Trying $candidate…');
         final ok = await _probeIp(candidate);
         return ok ? candidate : null;
       }());
@@ -156,11 +155,12 @@ class DashcamService {
     return null;
   }
 
-  /// Send heartbeat to keep Wi-Fi alive.
+  /// Heartbeat — uses getrecduration (per Swagger: highest poll-rate
+  /// endpoint, serves as both recording timer and connection keep-alive).
   static Future<bool> sendHeartbeat() async {
     try {
-      await _sendCommand(3016);
-      return true;
+      final json = await _getJson('getrecduration');
+      return _isOk(json);
     } catch (_) {
       return false;
     }
@@ -168,94 +168,116 @@ class DashcamService {
 
   // ── Device info ────────────────────────────────────────────────────────
 
+  /// GET /app/getdeviceattr
+  /// Returns: uuid, otaver, softver, hwver, ssid, bssid, camnum, curcamid, wifireboot
   static Future<DashcamDeviceInfo> getDeviceInfo() async {
-    final xml = await _sendCommand(3012);
-    return DashcamDeviceInfo.fromXml(xml);
+    final json = await _getJson('getdeviceattr');
+    return DashcamDeviceInfo.fromJson(json['info'] as Map<String, dynamic>);
   }
 
+  /// GET /app/getsdinfo
+  /// Returns: status, free (MB), total (MB)
   static Future<DashcamStorageInfo> getStorageInfo() async {
-    final xml = await _sendCommand(3017);
-    return DashcamStorageInfo.fromXml(xml);
+    final json = await _getJson('getsdinfo');
+    return DashcamStorageInfo.fromJson(json['info'] as Map<String, dynamic>);
+  }
+
+  /// GET /app/getmediainfo
+  /// Returns: rtsp URL, transport, port
+  static Future<DashcamMediaInfo> getMediaInfo() async {
+    final json = await _getJson('getmediainfo');
+    return DashcamMediaInfo.fromJson(json['info'] as Map<String, dynamic>);
   }
 
   // ── File operations ────────────────────────────────────────────────────
 
-  /// List all files on the dashcam. Tries multiple API variants.
-  static Future<List<DashcamFile>> listFiles() async {
-    // Switch to playback mode first (required by some firmware)
-    try { await _sendCommand(3001, par: 2); } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 500));
+  /// List ALL files from a folder, handling pagination.
+  /// [folder]: 'loop' (normal), 'emr' (emergency), 'park' (parking/timelapse)
+  static Future<List<DashcamFile>> listFiles({
+    String folder = 'loop',
+  }) async {
+    final allFiles = <DashcamFile>[];
+    int start = 0;
+    const int pageSize = 100;
 
-    // Try cmd=3015 (standard CARDV)
-    try {
-      final xml = await _sendCommand(3015);
-      var files = DashcamFile.parseFileListXml(xml);
-      if (files.isNotEmpty) return files;
+    while (true) {
+      final json = await _getJson(
+          'getfilelist?folder=$folder&start=$start&end=${start + pageSize}');
+      if (!_isOk(json)) break;
 
-      // Also try with par=0
-      final xml2 = await _sendCommand(3015, par: 0);
-      files = DashcamFile.parseFileListXml(xml2);
-      if (files.isNotEmpty) return files;
-    } catch (e) {
-      debugPrint('DashcamService cmd=3015 failed: $e');
+      final info = json['info'];
+      if (info is! List || info.isEmpty) break;
+
+      final folderData = info[0] as Map<String, dynamic>;
+      final totalCount = folderData['count'] as int? ?? 0;
+      final files = folderData['files'] as List? ?? [];
+
+      for (final f in files) {
+        allFiles.add(DashcamFile.fromJson(f as Map<String, dynamic>, folder));
+      }
+
+      // If we got all files or no more pages, stop
+      if (allFiles.length >= totalCount || files.length < pageSize) break;
+      start += files.length;
     }
 
-    // Try HTTP directory listing at /DCIM
-    try {
-      final html = await fetchRaw('$baseUrl/DCIM/');
-      final files = DashcamFile.parseDirectoryListing(html, '/DCIM/');
-      if (files.isNotEmpty) return files;
-    } catch (e) {
-      debugPrint('DashcamService /DCIM/ listing failed: $e');
-    }
-
-    // Try /SD/DCIM/ or /tmp/SD0/DCIM/
-    for (final path in ['/SD/DCIM/', '/tmp/SD0/DCIM/', '/sd/DCIM/']) {
-      try {
-        final html = await fetchRaw('$baseUrl$path');
-        final files = DashcamFile.parseDirectoryListing(html, path);
-        if (files.isNotEmpty) return files;
-      } catch (_) {}
-    }
-
-    // Try cmd=3025 (file count) to see if files exist
-    try {
-      final xml = await _sendCommand(3025);
-      debugPrint('DashcamService file count response: $xml');
-    } catch (_) {}
-
-    return [];
+    return allFiles;
   }
 
-  /// Delete a file by its path.
-  static Future<bool> deleteFile(String path) async {
-    try {
-      final xml = await _sendCommand(4003, str: path);
-      return _parseStatus(xml) == 0;
-    } catch (e) {
-      debugPrint('DashcamService deleteFile error: $e');
-      return false;
-    }
+  /// List files from ALL folder types (loop + emr + event + park).
+  static Future<List<DashcamFile>> listAllFiles() async {
+    final results = await Future.wait([
+      listFiles(folder: 'loop'),
+      listFiles(folder: 'emr'),
+      listFiles(folder: 'event'),
+      listFiles(folder: 'park'),
+    ]);
+    return [...results[0], ...results[1], ...results[2], ...results[3]];
   }
 
-  /// Get a thumbnail image as bytes. Returns null on failure.
-  static Future<Uint8List?> getThumbnail(String path) async {
-    final url = '$baseUrl/?custom=1&cmd=4002&str=${Uri.encodeComponent(path)}';
-    final client = HttpClient()..connectionTimeout = _cmdTimeout;
+  /// Get a thumbnail image as bytes.
+  /// [filePath]: full path on dashcam, e.g. /mnt/card/video_front/20260329_190645_f.ts
+  static Future<Uint8List?> getThumbnail(String filePath) async {
+    final url =
+        '$baseUrl/app/getthumbnail?file=${Uri.encodeComponent(filePath)}';
     try {
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close().timeout(_cmdTimeout);
-      if (response.statusCode != 200) return null;
-      final bytes = await consolidateHttpClientResponseBytes(response);
-      // Verify it looks like image data (JPEG starts with FF D8)
+      final bytes = await _getBytes(url, timeout: _thumbTimeout);
+      // Verify JPEG (starts with FF D8)
       if (bytes.length > 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
         return bytes;
+      }
+      // Some dashcams return thumbnail with HTTP headers prepended
+      // Find JPEG start marker
+      for (int i = 0; i < bytes.length - 1; i++) {
+        if (bytes[i] == 0xFF && bytes[i + 1] == 0xD8) {
+          return bytes.sublist(i);
+        }
       }
       return null;
     } catch (_) {
       return null;
-    } finally {
-      client.close(force: true);
+    }
+  }
+
+  /// Delete a file from the dashcam SD card.
+  /// [filePath]: full path, e.g. /mnt/card/video_front/20260329_190645_f.ts
+  static Future<bool> deleteFile(String filePath) async {
+    try {
+      final json = await _getJson(
+          'deletefile?file=${Uri.encodeComponent(filePath)}');
+      return _isOk(json);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Capture an instant photo snapshot from the active camera.
+  static Future<bool> takeSnapshot() async {
+    try {
+      final json = await _getJson('snapshot');
+      return _isOk(json);
+    } catch (_) {
+      return false;
     }
   }
 
@@ -299,94 +321,132 @@ class DashcamService {
     }
   }
 
-  // ── Camera control ─────────────────────────────────────────────────────
+  // ── Recording control ─────────────────────────────────────────────────
 
+  /// Enter recorder mode.
+  static Future<bool> enterRecorder() async {
+    try {
+      final json = await _getJson('enterrecorder');
+      return _isOk(json);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Start recording (set rec=1).
   static Future<bool> startRecording() async {
-    try {
-      await _sendCommand(3001, par: 0); // video mode
-      await Future.delayed(const Duration(milliseconds: 300));
-      final xml = await _sendCommand(2001, par: 1);
-      return _parseStatus(xml) == 0;
-    } catch (_) {
-      return false;
-    }
+    return await setParam('rec', 1);
   }
 
+  /// Stop recording (set rec=0).
   static Future<bool> stopRecording() async {
-    try {
-      final xml = await _sendCommand(2001, par: 0);
-      return _parseStatus(xml) == 0;
-    } catch (_) {
-      return false;
-    }
+    return await setParam('rec', 0);
   }
 
-  static Future<bool> takePhoto() async {
+  /// Get current recording duration in seconds.
+  static Future<int> getRecDuration() async {
     try {
-      await _sendCommand(3001, par: 1); // photo mode
-      await Future.delayed(const Duration(milliseconds: 300));
-      final xml = await _sendCommand(1001);
-      return _parseStatus(xml) == 0;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<bool> setMode(int mode) async {
-    try {
-      final xml = await _sendCommand(3001, par: mode);
-      return _parseStatus(xml) == 0;
-    } catch (_) {
-      return false;
-    }
+      final json = await _getJson('getrecduration');
+      if (_isOk(json)) {
+        return (json['info'] as Map<String, dynamic>)['duration'] as int? ?? 0;
+      }
+    } catch (_) {}
+    return 0;
   }
 
   // ── Settings ───────────────────────────────────────────────────────────
 
-  static Future<bool> setSetting(int cmd, int par) async {
+  /// Get all parameter values.
+  /// Returns: [{name: "mic", value: 1}, ...]
+  static Future<List<DashcamParam>> getParamValues() async {
+    final json = await _getJson('getparamvalue?param=all');
+    if (!_isOk(json)) return [];
+    final list = json['info'] as List? ?? [];
+    return list
+        .map((e) => DashcamParam.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Get a single parameter value.
+  static Future<int?> getParamValue(String param) async {
     try {
-      final xml = await _sendCommand(cmd, par: par);
-      return _parseStatus(xml) == 0;
+      final json = await _getJson('getparamvalue?param=$param');
+      if (_isOk(json)) {
+        return (json['info'] as Map<String, dynamic>)['value'] as int?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Get all parameter item schemas (available options).
+  /// Returns: [{name: "mic", items: ["off","on"], index: [0,1]}, ...]
+  static Future<List<DashcamParamSchema>> getParamItems() async {
+    final json = await _getJson('getparamitems?param=all');
+    if (!_isOk(json)) return [];
+    final list = json['info'] as List? ?? [];
+    return list
+        .map((e) => DashcamParamSchema.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Set a parameter value.
+  static Future<bool> setParam(String param, int value) async {
+    try {
+      final json = await _getJson('setparamvalue?param=$param&value=$value');
+      return _isOk(json);
     } catch (_) {
       return false;
     }
   }
 
-  static Future<bool> formatSDCard() async {
-    try {
-      final xml = await _sendCommand(3010);
-      return _parseStatus(xml) == 0;
-    } catch (_) {
-      return false;
-    }
-  }
+  // ── Time sync ─────────────────────────────────────────────────────────
 
-  static Future<String> getAllSettings() async {
-    return await _sendCommand(3014);
-  }
-
+  /// Set the dashcam system time.
   static Future<bool> setDateTime(DateTime dt) async {
-    final str = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
-        '${dt.day.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:'
-        '${dt.minute.toString().padLeft(2, '0')}:'
+    final dateStr = '${dt.year}'
+        '${dt.month.toString().padLeft(2, '0')}'
+        '${dt.day.toString().padLeft(2, '0')}'
+        '${dt.hour.toString().padLeft(2, '0')}'
+        '${dt.minute.toString().padLeft(2, '0')}'
         '${dt.second.toString().padLeft(2, '0')}';
     try {
-      final xml = await _sendCommand(3005, str: str);
-      return _parseStatus(xml) == 0;
+      final json = await _getJson('setsystime?date=$dateStr');
+      return _isOk(json);
     } catch (_) {
       return false;
     }
+  }
+
+  /// Set the dashcam timezone offset.
+  static Future<bool> setTimezone(int offset) async {
+    try {
+      final json = await _getJson('settimezone?timezone=$offset');
+      return _isOk(json);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Camera switch ─────────────────────────────────────────────────────
+
+  /// Switch active camera view: 0 = front, 1 = back.
+  static Future<bool> switchCamera(int camId) async {
+    return await setParam('switchcam', camId);
   }
 
   // ── RTSP stream URLs ──────────────────────────────────────────────────
 
-  static String get rtspFrontUrl => 'rtsp://$ip/xxx.mov';
+  /// Primary RTSP URL (port 5000 from getmediainfo, TCP transport).
+  static String get rtspUrl => 'rtsp://$ip:5000';
+
+  /// All possible RTSP stream URLs to try.
   static List<String> get rtspUrls => [
-    'rtsp://$ip/xxx.mov',
-    'rtsp://$ip/live',
-    'rtsp://$ip/liveRTSP/av1',
-    'rtsp://$ip:554/xxx.mov',
-    'http://$ip:8192',
-  ];
+        'rtsp://$ip:5000',
+        'rtsp://$ip:5000/live',
+        'rtsp://$ip:5000/0',
+        'rtsp://$ip:5000/1',
+        'rtsp://$ip',
+        'rtsp://$ip:554',
+        'http://$ip:5000',
+      ];
 }

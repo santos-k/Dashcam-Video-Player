@@ -9,7 +9,12 @@ import 'screens/player_screen.dart';
 import 'services/log_service.dart';
 import 'services/shortcut_service.dart';
 
-void main() async {
+/// Command-line arguments passed at launch (e.g. file/folder path from
+/// Windows file association or "Open with" context menu).
+List<String> launchArgs = const [];
+
+void main(List<String> args) async {
+  launchArgs = args;
   WidgetsFlutterBinding.ensureInitialized();
   await LogService.instance.init();
   ShortcutService.init();

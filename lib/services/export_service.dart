@@ -27,7 +27,7 @@ class ExportService {
     // Get duration for progress estimation
     Duration? duration;
     try {
-      duration = await _probeDuration(ffmpeg, pair.frontFile?.path ?? pair.backFile!.path);
+      duration = await _probeDuration(ffmpeg, pair.frontPath ?? pair.backPath!);
     } catch (_) {}
 
     final args = _buildArgs(pair, layout, syncOffsetMs, outputPath, pipPosition);
@@ -71,9 +71,13 @@ class ExportService {
         ? (syncOffsetMs / 1000.0).toStringAsFixed(3)
         : '0';
 
-    // Single video (no front or no back)
-    if (!pair.isPaired) {
-      final input = pair.frontFile?.path ?? pair.backFile!.path;
+    // Single video (no front or no back, or front/back only layout)
+    if (!pair.isPaired ||
+        layout.mode == LayoutMode.frontOnly ||
+        layout.mode == LayoutMode.backOnly) {
+      final input = layout.mode == LayoutMode.backOnly
+          ? (pair.backPath ?? pair.frontPath!)
+          : (pair.frontPath ?? pair.backPath!);
       return ['-i', input, '-c:v', 'libx264', '-crf', '23',
               '-preset', 'fast', '-c:a', 'aac', '-y', outputPath];
     }
@@ -82,9 +86,9 @@ class ExportService {
 
     return [
       '-itsoffset', frontDelay,
-      '-i', pair.frontFile!.path,
+      '-i', pair.frontPath!,
       '-itsoffset', backDelay,
-      '-i', pair.backFile!.path,
+      '-i', pair.backPath!,
       '-filter_complex', filter,
       '-map', '[out]',
       '-map', '0:a?',
@@ -119,6 +123,11 @@ class ExportService {
             'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[main];'
             '[$pipIdx:v]scale=480:270[pip];'
             '[main][pip]overlay=${pos[0]}:${pos[1]}[out]';
+      case LayoutMode.frontOnly:
+      case LayoutMode.backOnly:
+        // Single video — no filter graph needed, handled by _buildArgs
+        return '[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,'
+            'pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black[out]';
     }
   }
 
@@ -209,9 +218,154 @@ class ExportService {
       if (lat == null || lon == null) return null;
 
       return (lat, lon);
+    } catch (_) {}
+
+    // Fallback: parse embedded GPS text from .ts file binary data.
+    try {
+      return await _extractGPSFromTsStream(videoPath);
+    } catch (_) {}
+
+    return null;
+  }
+
+  /// Extract GPS from .ts file by reading binary data for embedded text GPS.
+  /// Returns the first valid coordinate pair found.
+  static Future<(double, double)?> _extractGPSFromTsStream(String videoPath) async {
+    final file = File(videoPath);
+    if (!await file.exists()) return null;
+    final fileSize = await file.length();
+
+    final readSize = fileSize < 2 * 1024 * 1024 ? fileSize : 2 * 1024 * 1024;
+    final raf = await file.open(mode: FileMode.read);
+    try {
+      await raf.setPosition(fileSize - readSize);
+      final bytes = await raf.read(readSize);
+      final text = String.fromCharCodes(
+        bytes.where((b) => b >= 0x20 && b < 0x7F || b == 0x0A || b == 0x0D),
+      );
+
+      // Pattern: "N:lat E:lon" or "S:lat W:lon" (Onelap dashcam format)
+      final re = RegExp(r'([NS]):(\d+\.\d+)\s+([EW]):(\d+\.\d+)');
+      final match = re.firstMatch(text);
+      if (match != null) {
+        var lat = double.tryParse(match.group(2)!);
+        var lon = double.tryParse(match.group(4)!);
+        if (lat != null && lon != null && lat != 0 && lon != 0) {
+          if (match.group(1) == 'S') lat = -lat;
+          if (match.group(3) == 'W') lon = -lon;
+          return (lat, lon);
+        }
+      }
+    } finally {
+      await raf.close();
+    }
+    return null;
+  }
+
+  /// Extract all GPS points from a .ts video for synced map tracking.
+  /// Returns list of (seconds_offset, lat, lon, speed_kmh, datetime_string).
+  static Future<List<(double, double, double, double, String)>?> extractGPSTrack(
+      String videoPath) async {
+    final file = File(videoPath);
+    if (!await file.exists()) return null;
+    final fileSize = await file.length();
+
+    try {
+      final readSize = fileSize < 4 * 1024 * 1024 ? fileSize : 4 * 1024 * 1024;
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        await raf.setPosition(fileSize - readSize);
+        final bytes = await raf.read(readSize);
+        final text = String.fromCharCodes(
+          bytes.where((b) => b >= 0x20 && b < 0x7F || b == 0x0A || b == 0x0D),
+        );
+
+        // Pattern: "YYYY/MM/DD HH:MM:SS N:lat E:lon speed"
+        final re = RegExp(
+          r'(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+([NS]):(\d+\.\d+)\s+([EW]):(\d+\.\d+)\s+(\d+\.\d+)',
+        );
+        final matches = re.allMatches(text).toList();
+        if (matches.isEmpty) return null;
+
+        DateTime? baseTime;
+        final track = <(double, double, double, double, String)>[];
+        for (final m in matches) {
+          final timeStr = m.group(1)!;
+          final timeParts = timeStr.split(RegExp(r'[/ :]'));
+          if (timeParts.length < 6) continue;
+          final dt = DateTime(
+            int.parse(timeParts[0]), int.parse(timeParts[1]),
+            int.parse(timeParts[2]), int.parse(timeParts[3]),
+            int.parse(timeParts[4]), int.parse(timeParts[5]),
+          );
+          baseTime ??= dt;
+          final secs = dt.difference(baseTime).inMilliseconds / 1000.0;
+          var lat = double.tryParse(m.group(3)!);
+          var lon = double.tryParse(m.group(5)!);
+          final speed = double.tryParse(m.group(6)!) ?? 0;
+          if (lat == null || lon == null) continue;
+          if (m.group(2) == 'S') lat = -lat;
+          if (m.group(4) == 'W') lon = -lon;
+          if (lat == 0 && lon == 0) continue;
+          track.add((secs, lat, lon, speed, timeStr));
+        }
+        return track.isEmpty ? null : track;
+      } finally {
+        await raf.close();
+      }
     } catch (_) {
       return null;
     }
+  }
+
+  /// Extract the first GPS timestamp from a .ts file.
+  /// Returns the DateTime parsed from the embedded GPS text, or null.
+  static Future<DateTime?> extractFirstGpsTime(String videoPath) async {
+    final file = File(videoPath);
+    if (!await file.exists()) return null;
+    final fileSize = await file.length();
+
+    try {
+      final readSize = fileSize < 4 * 1024 * 1024 ? fileSize : 4 * 1024 * 1024;
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        await raf.setPosition(fileSize - readSize);
+        final bytes = await raf.read(readSize);
+        final text = String.fromCharCodes(
+          bytes.where((b) => b >= 0x20 && b < 0x7F || b == 0x0A || b == 0x0D),
+        );
+
+        final match = RegExp(
+          r'(\d{4})/(\d{2})/(\d{2}) (\d{2}):(\d{2}):(\d{2})\s+[NS]:\d+\.\d+',
+        ).firstMatch(text);
+        if (match == null) return null;
+
+        return DateTime(
+          int.parse(match.group(1)!), int.parse(match.group(2)!),
+          int.parse(match.group(3)!), int.parse(match.group(4)!),
+          int.parse(match.group(5)!), int.parse(match.group(6)!),
+        );
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Compute sync offset (in ms) between front and back .ts files
+  /// using their embedded GPS timestamps.
+  /// Positive = back is ahead (seek back forward), negative = front is ahead.
+  static Future<int> computeGpsSyncOffset(
+      String frontPath, String backPath) async {
+    final results = await Future.wait([
+      extractFirstGpsTime(frontPath),
+      extractFirstGpsTime(backPath),
+    ]);
+    final frontTime = results[0];
+    final backTime = results[1];
+    if (frontTime == null || backTime == null) return 0;
+    return frontTime.difference(backTime).inMilliseconds;
   }
 
   /// Use ffprobe to get video duration.

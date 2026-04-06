@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:path/path.dart' as p;
+import '../models/dashcam_file.dart';
 import '../models/video_pair.dart';
 import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
@@ -17,8 +19,10 @@ import '../services/shortcut_service.dart';
 // ─────────────────────────────────────────
 
 enum SortOrder { newestFirst, oldestFirst }
+enum GroupBy { none, date, fileType, videoType }
 
 final sortOrderProvider = StateProvider<SortOrder>((ref) => SortOrder.oldestFirst);
+final groupByProvider   = StateProvider<GroupBy>((ref) => GroupBy.none);
 
 // ─────────────────────────────────────────
 // 1b. Clip view mode & selection
@@ -57,17 +61,58 @@ class VideoPairListNotifier extends StateNotifier<List<VideoPair>> {
         : List.of(_raw);
   }
 
-  /// Remove pairs at the given indices and return the removed pairs.
+  /// Remove pairs at the given indices (referencing current [state] order)
+  /// and return the removed pairs.
   List<VideoPair> removePairs(Set<int> indices) {
-    final removed = <VideoPair>[];
-    final sorted = indices.toList()..sort((a, b) => b.compareTo(a)); // reverse
-    for (final i in sorted) {
-      if (i >= 0 && i < _raw.length) {
-        removed.add(_raw.removeAt(i));
+    // Collect the actual VideoPair objects to remove (by identity, not index)
+    final toRemove = <VideoPair>{};
+    for (final i in indices) {
+      if (i >= 0 && i < state.length) {
+        toRemove.add(state[i]);
       }
     }
+    _raw.removeWhere((p) => toRemove.contains(p));
     state = List.of(_raw);
-    return removed;
+    return toRemove.toList();
+  }
+
+  /// Load dashcam WiFi files and pair them into VideoPairs.
+  /// Merges with any existing local pairs.
+  void loadFromDashcam(List<DashcamFile> files) {
+    final wifiPairs = FilePairer.pairFromDashcam(files);
+    appLog('Dashcam', 'Paired ${wifiPairs.length} clips from WiFi dashcam');
+
+    // Remove any previous WiFi pairs, keep local ones
+    _raw.removeWhere((p) => p.isRemote);
+    _raw.addAll(wifiPairs);
+    _raw.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    state = List.of(_raw);
+  }
+
+  /// Remove all WiFi dashcam pairs (on disconnect).
+  void clearDashcamPairs() {
+    _raw.removeWhere((p) => p.isRemote);
+    state = List.of(_raw);
+  }
+
+  /// Load individual video files as standalone clips (from drag & drop or
+  /// file association). Each file becomes a front-only VideoPair.
+  void loadFiles(List<File> files) {
+    final pairs = files.map((f) {
+      final name = p.basenameWithoutExtension(f.path);
+      DateTime ts;
+      try { ts = f.lastModifiedSync(); } catch (_) { ts = DateTime.now(); }
+      return VideoPair(
+        id: name,
+        frontFile: f,
+        timestamp: ts,
+      );
+    }).toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    appLog('Files', 'Loaded ${pairs.length} individual video files');
+    _raw  = pairs;
+    state = pairs;
   }
 
   void clear() {
@@ -132,6 +177,9 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   /// Called by the UI when a clip ends — advances to next pair.
   VoidCallback? onClipEnd;
 
+  /// Called when a clip duration is resolved after loading.
+  void Function(String clipId, Duration duration)? onDurationResolved;
+
   Future<void> loadPair(VideoPair pair, int syncOffsetMs,
       {bool autoPlay = false}) async {
     appLog('Playback', 'loadPair: ${pair.id} (front=${pair.hasFront}, back=${pair.hasBack}, offset=$syncOffsetMs, autoPlay=$autoPlay)');
@@ -151,19 +199,23 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     try {
       await Future.wait([
         if (pair.hasFront)
-          _frontPlayer.open(Media(pair.frontFile!.path), play: false),
+          _frontPlayer.open(Media(pair.frontPath!), play: false),
         if (pair.hasBack)
-          _backPlayer.open(Media(pair.backFile!.path),   play: false),
+          _backPlayer.open(Media(pair.backPath!),   play: false),
       ]);
     } catch (e) {
       debugPrint('media_kit open error: $e');
     }
 
-    // Apply sync offset
-    if (offset > 0 && pair.hasBack) {
-      await _backPlayer.seek(Duration(milliseconds: offset));
-    } else if (offset < 0 && pair.hasFront) {
-      await _frontPlayer.seek(Duration(milliseconds: -offset));
+    // Apply sync offset — wait briefly for players to be ready after open
+    if (offset != 0) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (offset > 0 && pair.hasBack) {
+        await _backPlayer.seek(Duration(milliseconds: offset));
+      } else if (offset < 0 && pair.hasFront) {
+        await _frontPlayer.seek(Duration(milliseconds: -offset));
+      }
+      appLog('Playback', 'Sync offset applied: ${offset}ms');
     }
 
     state = PlaybackState(
@@ -179,6 +231,15 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         if (pair.hasBack)  _backPlayer.play(),
       ]);
     }
+
+    // Cache the clip duration
+    Future.delayed(const Duration(milliseconds: 500), () {
+      final primary = pair.hasFront ? _frontPlayer : _backPlayer;
+      final dur = primary.state.duration;
+      if (dur > Duration.zero) {
+        onDurationResolved?.call(pair.id, dur);
+      }
+    });
 
     // Listen for end-of-file on the primary player
     _listenForEnd(pair);
@@ -277,12 +338,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     state = PlaybackState.initial();
   }
 
-  Future<void> setFrontMuted(bool muted) async {
-    await _frontPlayer.setVolume(muted ? 0 : 100);
+  Future<void> setFrontVolume(double volume) async {
+    await _frontPlayer.setVolume(volume.clamp(0, 100));
   }
 
-  Future<void> setBackMuted(bool muted) async {
-    await _backPlayer.setVolume(muted ? 0 : 100);
+  Future<void> setBackVolume(double volume) async {
+    await _backPlayer.setVolume(volume.clamp(0, 100));
   }
 
   Future<void> setSpeed(double speed) async {
@@ -371,11 +432,17 @@ final batchExportProvider = StateProvider<BatchExportState?>((ref) => null);
 final savingClipsProvider = StateProvider<String?>((ref) => null);
 
 // ─────────────────────────────────────────
-// 9. Mute state per camera
+// 9. Clip duration cache (populated after each loadPair)
 // ─────────────────────────────────────────
 
-final frontMutedProvider = StateProvider<bool>((ref) => false);
-final backMutedProvider  = StateProvider<bool>((ref) => false);
+final clipDurationCacheProvider = StateProvider<Map<String, Duration>>((ref) => {});
+
+// ─────────────────────────────────────────
+// 10. Volume per camera (0.0 - 100.0)
+// ─────────────────────────────────────────
+
+final frontVolumeProvider = StateProvider<double>((ref) => 100.0);
+final backVolumeProvider  = StateProvider<double>((ref) => 100.0);
 
 // PIP position reset signal
 final pipResetProvider = StateProvider<int>((ref) => 0);

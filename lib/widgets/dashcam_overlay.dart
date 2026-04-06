@@ -1,13 +1,10 @@
 // lib/widgets/dashcam_overlay.dart
 
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/dashcam_state.dart';
 import '../providers/dashcam_providers.dart';
 import '../services/dashcam_service.dart';
-import '../services/dashcam_tcp_service.dart';
 import 'dashcam_file_browser.dart';
 import 'dashcam_live_view.dart';
 
@@ -92,7 +89,7 @@ class _DashcamOverlayState extends ConsumerState<DashcamOverlay>
                     children: [
                       DashcamFileBrowser(files: dcState.files),
                       const DashcamLiveView(),
-                      _SettingsTab(storage: dcState.storageInfo),
+                      const _SettingsTab(),
                     ],
                   )
                 : _DisconnectedBody(status: dcState.status, error: dcState.errorMessage),
@@ -165,6 +162,10 @@ class _Header extends StatelessWidget {
               Text('v${device!.firmware}',
                   style: const TextStyle(color: Colors.white30, fontSize: 10)),
             ],
+            if (device!.camnum > 1) ...[
+              const SizedBox(width: 6),
+              _pill('${device!.camnum} cam', const Color(0xFF4FC3F7)),
+            ],
           ],
         ],
 
@@ -206,6 +207,17 @@ class _Header extends StatelessWidget {
       ]),
     );
   }
+
+  static Widget _pill(String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.15),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
+      borderRadius: BorderRadius.circular(3),
+    ),
+    child: Text(text,
+        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w600)),
+  );
 }
 
 class _StorageChip extends StatelessWidget {
@@ -330,7 +342,7 @@ class _DisconnectedBodyState extends ConsumerState<_DisconnectedBody> {
                     borderRadius: BorderRadius.circular(6),
                     borderSide: const BorderSide(color: Colors.white10),
                   ),
-                  hintText: '192.168.1.254',
+                  hintText: '192.168.169.1',
                   hintStyle: const TextStyle(color: Colors.white24),
                 ),
                 onChanged: (v) {
@@ -381,8 +393,8 @@ class _HelpCard extends StatelessWidget {
                 fontWeight: FontWeight.w600, letterSpacing: 1)),
         SizedBox(height: 10),
         _Step('1', 'Turn on your Onelap dashcam and enable its Wi-Fi'),
-        _Step('2', 'Connect your PC to the dashcam Wi-Fi hotspot'),
-        _Step('3', 'Click Connect — it auto-scans common IPs'),
+        _Step('2', 'Connect your PC to the dashcam Wi-Fi hotspot (e.g. onelap-5Ghz-…)'),
+        _Step('3', 'Click Connect — default IP is 192.168.169.1'),
         _Step('4', 'If auto-scan fails, enter the IP manually'),
         SizedBox(height: 12),
         Text('FIND DASHCAM IP FROM PHONE',
@@ -429,82 +441,81 @@ class _Step extends StatelessWidget {
 
 // ─── Settings tab ───────────────────────────────────────────────────────────
 
+/// Settings labels and icons for known dashcam params.
+const _paramMeta = <String, (IconData, String)>{
+  'switchcam':             (Icons.cameraswitch_rounded,       'Camera View'),
+  'mic':                   (Icons.mic_rounded,                'Microphone'),
+  'osd':                   (Icons.subtitles_rounded,          'On-Screen Display'),
+  'rec_resolution':        (Icons.high_quality_rounded,       'Resolution'),
+  'rec_split_duration':    (Icons.timelapse_rounded,          'Clip Duration'),
+  'speaker':               (Icons.volume_up_rounded,          'Speaker Volume'),
+  'gsr_sensitivity':       (Icons.vibration_rounded,          'G-Sensor Sensitivity'),
+  'park_gsr_sensitivity':  (Icons.local_parking_rounded,      'Park G-Sensor'),
+  'timelapse_rate':        (Icons.speed_rounded,              'Timelapse Rate'),
+  'boot_sound':            (Icons.music_note_rounded,         'Boot Sound'),
+  'speed_unit':            (Icons.speed_rounded,              'Speed Unit'),
+  'rec':                   (Icons.fiber_manual_record_rounded,'Recording'),
+};
+
 class _SettingsTab extends ConsumerWidget {
-  final DashcamStorageInfo? storage;
-  const _SettingsTab({this.storage});
+  const _SettingsTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final dcState = ref.watch(dashcamProvider);
     final notifier = ref.read(dashcamProvider.notifier);
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ── Camera Control ──
         const _SectionTitle('Camera Control'),
         _SettingRow(
           icon: Icons.fiber_manual_record_rounded,
-          label: 'Start Recording',
+          label: dcState.isRecording ? 'Recording…' : 'Start Recording',
           trailing: ElevatedButton(
-            onPressed: () => notifier.startRecording(),
+            onPressed: () => dcState.isRecording
+                ? notifier.stopRecording()
+                : notifier.startRecording(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red, foregroundColor: Colors.white,
+              backgroundColor: dcState.isRecording ? Colors.grey : Colors.red,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               minimumSize: Size.zero,
             ),
-            child: const Text('REC', style: TextStyle(fontSize: 11)),
+            child: Text(dcState.isRecording ? 'STOP' : 'REC',
+                style: const TextStyle(fontSize: 11)),
           ),
         ),
-        _SettingRow(
-          icon: Icons.stop_rounded,
-          label: 'Stop Recording',
-          trailing: _ActionBtn('Stop', () => notifier.stopRecording()),
-        ),
+        if (dcState.deviceInfo != null && dcState.deviceInfo!.camnum > 1) ...[
+          _SettingRow(
+            icon: Icons.cameraswitch_rounded,
+            label: 'Switch Camera',
+            subtitle: 'Current: ${dcState.deviceInfo!.curcamid == 0 ? "Front" : "Back"}',
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              _ActionBtn('Front', () => notifier.switchCamera(0)),
+              const SizedBox(width: 4),
+              _ActionBtn('Back', () => notifier.switchCamera(1)),
+            ]),
+          ),
+        ],
         _SettingRow(
           icon: Icons.camera_alt_rounded,
-          label: 'Take Photo',
-          trailing: _ActionBtn('Capture', () => notifier.takePhoto()),
+          label: 'Take Snapshot',
+          trailing: _ActionBtn('Capture', () => DashcamService.takeSnapshot()),
         ),
 
         const SizedBox(height: 12),
-        const _SectionTitle('Video Settings'),
-        _DropdownSetting(
-          icon: Icons.high_quality_rounded,
-          label: 'Resolution',
-          items: const {'1080p 30fps': 0, '1080p 60fps': 1, '720p 30fps': 2, '720p 60fps': 3},
-          onChanged: (v) => DashcamService.setSetting(2002, v),
-        ),
-        _DropdownSetting(
-          icon: Icons.loop_rounded,
-          label: 'Loop Recording',
-          items: const {'Off': 0, '1 min': 1, '3 min': 2, '5 min': 3},
-          onChanged: (v) => DashcamService.setSetting(2003, v),
-        ),
-        _ToggleSetting(
-          icon: Icons.hdr_on_rounded,
-          label: 'WDR / HDR',
-          cmd: 2004,
-        ),
-        _ToggleSetting(
-          icon: Icons.mic_rounded,
-          label: 'Audio Recording',
-          cmd: 2007,
-        ),
-        _ToggleSetting(
-          icon: Icons.date_range_rounded,
-          label: 'Date Stamp',
-          cmd: 2008,
-        ),
-        _ToggleSetting(
-          icon: Icons.directions_car_rounded,
-          label: 'Motion Detection',
-          cmd: 2006,
-        ),
-        _DropdownSetting(
-          icon: Icons.vibration_rounded,
-          label: 'G-Sensor Sensitivity',
-          items: const {'Off': 0, 'Low': 1, 'Medium': 2, 'High': 3},
-          onChanged: (v) => DashcamService.setSetting(2011, v),
-        ),
+        const _SectionTitle('Dashcam Settings'),
+
+        // ── Dynamic settings from API ──
+        // Filter out 'switchcam' and 'rec' (handled above)
+        for (final schema in dcState.paramSchemas)
+          if (schema.name != 'switchcam' && schema.name != 'rec')
+            _DynamicSetting(
+              schema: schema,
+              currentValue: dcState.paramValue(schema.name) ?? 0,
+            ),
 
         const SizedBox(height: 12),
         const _SectionTitle('Device'),
@@ -519,383 +530,105 @@ class _SettingsTab extends ConsumerWidget {
           trailing: _ActionBtn('Refresh', () => notifier.refreshFiles()),
         ),
         _SettingRow(
-          icon: Icons.bug_report_rounded,
-          label: 'Probe API (debug)',
-          trailing: _ActionBtn('Probe', () async {
-            final results = <String>[];
-            final base = DashcamService.baseUrl;
-            // Comprehensive probe: CGI, REST, CARDV, iCatch, Ambarella, etc.
-            for (final path in [
-              '/',
-              '/?custom=1&cmd=3015',
-              '/?custom=1&cmd=3012',
-              // iCatch / Config.cgi style
-              '/cgi-bin/Config.cgi?action=get&property=Camera.Menu.Net.WIFI.AP.SSID',
-              '/cgi-bin/Config.cgi?action=get_file_list',
-              '/cgi-bin/Config.cgi?action=get&property=Camera.Preview.MJPEG.status',
-              '/cgi-bin/cmd.cgi?cmd=getfilelist',
-              // REST / JSON API
-              '/api/v1/files',
-              '/api/v1/status',
-              '/api/files',
-              '/api/config',
-              '/v1/files',
-              // Common dashcam paths
-              '/CARDV/',
-              '/CARDV/DCIM/',
-              '/tmp/SD0/',
-              '/tmp/SD0/DCIM/',
-              '/tmp/fuse_d/',
-              '/tmp/fuse_d/DCIM/',
-              '/tmp/FL0/',
-              '/tmp/FL0/DCIM/',
-              // MJPEG/stream paths
-              '/livestream',
-              '/live',
-              '/stream',
-              '/mjpeg',
-              '/video',
-              '/preview',
-            ]) {
-              try {
-                final body = await DashcamService.fetchRaw(
-                    '${DashcamService.baseUrl}$path');
-                results.add('$path → ${body.length}B: ${body.substring(0, body.length.clamp(0, 200))}');
-              } catch (e) {
-                results.add('$path → ERROR: $e');
-              }
-            }
-            if (context.mounted) {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  backgroundColor: const Color(0xFF1A1A1A),
-                  title: const Text('API Probe Results',
-                      style: TextStyle(color: Colors.white, fontSize: 14)),
-                  content: SizedBox(
-                    width: 500, height: 400,
-                    child: SingleChildScrollView(
-                      child: SelectableText(
-                        results.join('\n\n'),
-                        style: const TextStyle(color: Colors.white60,
-                            fontSize: 10, fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context),
-                        child: const Text('Close')),
-                  ],
-                ),
-              );
-            }
-          }),
+          icon: Icons.refresh_rounded,
+          label: 'Refresh settings',
+          trailing: _ActionBtn('Refresh', () => notifier.refreshSettings()),
         ),
-        _SettingRow(
-          icon: Icons.bug_report_rounded,
-          label: 'Deep scan (ports + POST + formats)',
-          trailing: _ActionBtn('Scan', () async {
-            final results = <String>[];
-            final ip = DashcamService.ip;
 
-            // 1. TCP port scan
-            results.add('=== TCP PORT SCAN ===');
-            for (final port in [80, 554, 3333, 7878, 8080, 8192, 8554, 9999, 6666, 4321, 5000, 8000, 443]) {
-              try {
-                final sock = await Socket.connect(ip, port,
-                    timeout: const Duration(seconds: 2));
-                results.add('TCP:$port → OPEN');
-                sock.destroy();
-              } catch (_) {
-                results.add('TCP:$port → closed');
-              }
-            }
-
-            // 2. HTTP on open ports
-            results.add('\n=== HTTP PROBES ===');
-            for (final port in [80, 5000, 3333, 7878, 8080, 8192]) {
-              try {
-                final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-                final req = await client.getUrl(Uri.parse('http://$ip:$port/'));
-                final res = await req.close().timeout(const Duration(seconds: 3));
-                final body = await res.transform(const Utf8Decoder(allowMalformed: true)).join();
-                results.add('HTTP:$port/ → [${res.statusCode}] ${body.substring(0, body.length.clamp(0, 120))}');
-                client.close(force: true);
-              } catch (e) {
-                results.add('HTTP:$port/ → $e'.substring(0, 80));
-              }
-            }
-
-            // 3. Try POST requests on port 80
-            results.add('\n=== POST REQUESTS ===');
-            for (final entry in {
-              '/': '{"cmd":"list_files"}',
-              '/cmd': '{"cmd":"list_files"}',
-              '/': '{"action":"get_file_list"}',
-              '/rpc': '{"method":"get_file_list","id":1}',
-              '/?cmd=3015': '',
-              '/?cmd=list': '',
-              '/?action=list_files': '',
-            }.entries) {
-              try {
-                final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-                final req = await client.postUrl(Uri.parse('http://$ip${entry.key}'));
-                req.headers.contentType = ContentType.json;
-                if (entry.value.isNotEmpty) req.write(entry.value);
-                final res = await req.close().timeout(const Duration(seconds: 3));
-                final body = await res.transform(const Utf8Decoder(allowMalformed: true)).join();
-                results.add('POST ${entry.key} → [${res.statusCode}] ${body.substring(0, body.length.clamp(0, 120))}');
-                client.close(force: true);
-              } catch (e) {
-                results.add('POST ${entry.key} → ERR');
-              }
-            }
-
-            // 4. Try different GET query formats
-            results.add('\n=== QUERY FORMATS ===');
-            for (final path in [
-              '/?cmd=3015',
-              '/?cmd=list',
-              '/?action=list',
-              '/?op=list',
-              '/?func=list',
-              '/?cmd=get_file_list',
-              '/?cmd=getfilelist',
-              '/?custom=1&cmd=3015&type=0',
-              '/?custom=1&cmd=3015&par=1',
-              '/?custom=2&cmd=3015',
-              '/onel/',
-              '/onelap/',
-              '/config',
-              '/status',
-              '/info',
-              '/list',
-              '/filelist',
-              '/file_list',
-              '/get_file_list',
-              '/photo/',
-              '/video/',
-              '/normal/',
-              '/event/',
-              '/DCIM/MOVIE/',
-              '/DCIM/PHOTO/',
-              '/DCIM/100MEDIA/',
-            ]) {
-              try {
-                final body = await DashcamService.fetchRaw('http://$ip$path');
-                // Only show if different from defaults
-                if (!body.contains('url_root success') && !body.contains('{result: 98}')) {
-                  results.add('GET $path → ${body.substring(0, body.length.clamp(0, 200))}');
-                }
-              } catch (_) {}
-            }
-            results.add('(paths returning url_root/98 omitted)');
-
-            // 5. Deep probe port 5000
-            results.add('\n=== PORT 5000 DEEP PROBE ===');
-            // HTTP GET on port 5000
-            for (final path in [
-              '/', '/status', '/config', '/files', '/list',
-              '/DCIM/', '/api/', '/cmd', '/stream', '/live',
-              '/?cmd=3015', '/?action=list', '/?custom=1&cmd=3015',
-            ]) {
-              try {
-                final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-                final req = await client.getUrl(Uri.parse('http://$ip:5000$path'));
-                final res = await req.close().timeout(const Duration(seconds: 3));
-                final body = await res.transform(const Utf8Decoder(allowMalformed: true)).join();
-                results.add('GET :5000$path → [${res.statusCode}] ${body.substring(0, body.length.clamp(0, 200))}');
-                client.close(force: true);
-              } catch (e) {
-                results.add('GET :5000$path → ${e.toString().substring(0, e.toString().length.clamp(0, 60))}');
-              }
-            }
-            // POST on port 5000
-            for (final body in [
-              '{"cmd":"list_files"}',
-              '{"action":"get_file_list"}',
-              '{"method":"getFileList"}',
-              '{"msg_id":1283}',
-              '{"token":0,"msg_id":257}',
-              'list_files',
-            ]) {
-              try {
-                final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-                final req = await client.postUrl(Uri.parse('http://$ip:5000/'));
-                req.headers.contentType = ContentType.json;
-                req.write(body);
-                final res = await req.close().timeout(const Duration(seconds: 3));
-                final resp = await res.transform(const Utf8Decoder(allowMalformed: true)).join();
-                results.add('POST :5000 $body → [${res.statusCode}] ${resp.substring(0, resp.length.clamp(0, 200))}');
-                client.close(force: true);
-              } catch (e) {
-                results.add('POST :5000 $body → ERR');
-              }
-            }
-            // Raw TCP on port 5000
-            try {
-              final sock = await Socket.connect(ip, 5000, timeout: const Duration(seconds: 2));
-              // Send a JSON command and read response
-              sock.write('{"msg_id":257,"token":0}\n');
-              await sock.flush();
-              final resp = await sock.timeout(const Duration(seconds: 3)).first;
-              results.add('TCP:5000 raw → ${String.fromCharCodes(resp).substring(0, String.fromCharCodes(resp).length.clamp(0, 200))}');
-              sock.destroy();
-            } catch (e) {
-              results.add('TCP:5000 raw → $e');
-            }
-
-            if (context.mounted) {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  backgroundColor: const Color(0xFF1A1A1A),
-                  title: const Text('Deep Scan Results',
-                      style: TextStyle(color: Colors.white, fontSize: 14)),
-                  content: SizedBox(
-                    width: 560, height: 450,
-                    child: SingleChildScrollView(
-                      child: SelectableText(
-                        results.join('\n'),
-                        style: const TextStyle(color: Colors.white60,
-                            fontSize: 10, fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context),
-                        child: const Text('Close')),
-                  ],
-                ),
-              );
-            }
-          }),
-        ),
-        _SettingRow(
-          icon: Icons.bug_report_rounded,
-          label: 'TCP format probe (port 5000)',
-          trailing: _ActionBtn('Probe TCP', () async {
-            final ip = DashcamService.ip;
-            final results = <String>[];
-
-            results.add('Connecting to $ip:5000...');
-            final ok = await DashcamTcpService.connect(ip);
-            if (!ok) {
-              results.add('FAILED to connect');
-              if (context.mounted) {
-                showDialog(context: context, builder: (_) => _ProbeDialog('TCP Probe', results.join('\n')));
-              }
-              return;
-            }
-            results.add('Connected!\n');
-
-            // Drain GPS messages first
-            await Future.delayed(const Duration(seconds: 1));
-
-            final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000);
-            // Try many formats: with info/time like GPS, plain, with params
-            final rawCommands = <String>[
-              // Same format as GPS messages (msgid + info + time)
-              '{"msgid":"get_file_list","info":{},"time":$ts}',
-              '{"msgid":"filelist","info":{},"time":$ts}',
-              '{"msgid":"file_list","info":{},"time":$ts}',
-              '{"msgid":"query_file","info":{},"time":$ts}',
-              '{"msgid":"get_record_list","info":{},"time":$ts}',
-              '{"msgid":"get_camera_info","info":{},"time":$ts}',
-              '{"msgid":"camera_info","info":{},"time":$ts}',
-              '{"msgid":"get_status","info":{},"time":$ts}',
-              '{"msgid":"status","info":{},"time":$ts}',
-              '{"msgid":"get_storage","info":{},"time":$ts}',
-              '{"msgid":"get_setting","info":{},"time":$ts}',
-              '{"msgid":"get_config","info":{},"time":$ts}',
-              '{"msgid":"start_preview","info":{},"time":$ts}',
-              '{"msgid":"start_stream","info":{},"time":$ts}',
-              '{"msgid":"init","info":{},"time":$ts}',
-              '{"msgid":"connect","info":{},"time":$ts}',
-              '{"msgid":"app_connect","info":{},"time":$ts}',
-              '{"msgid":"heartbeat","info":{},"time":$ts}',
-              '{"msgid":"get_capability","info":{},"time":$ts}',
-              '{"msgid":"get_wifi_info","info":{},"time":$ts}',
-              // Without time/info
-              '{"msgid":"get_file_list"}',
-              '{"msgid":"get_camera_info"}',
-              '{"msgid":"start_preview"}',
-              // With param/token
-              '{"msgid":"get_file_list","param":{"type":"all"}}',
-              '{"msgid":"get_file_list","token":0}',
-              '{"msg_id":257,"token":0}',
-              '{"msg_id":3015}',
-              // Different key names
-              '{"cmd":"get_file_list"}',
-              '{"type":"get_file_list"}',
-              '{"action":"get_file_list"}',
-            ];
-
-            results.add('=== FORMAT PROBE (${rawCommands.length} variants) ===');
-            for (final raw in rawCommands) {
-              final (collected, _) = await DashcamTcpService.sendAndCollect(
-                raw, collectDuration: const Duration(seconds: 1));
-              // Filter out GPS noise
-              final nonGps = collected.where((m) => m['msgid'] != 'gps').toList();
-              if (nonGps.isNotEmpty) {
-                for (final m in nonGps) {
-                  final s = jsonEncode(m);
-                  results.add('MATCH: $raw\n  → ${s.substring(0, s.length.clamp(0, 250))}');
-                }
-              }
-            }
-
-            if (!results.any((r) => r.startsWith('MATCH:'))) {
-              results.add('\nNo non-GPS responses for any format.');
-              results.add('Use "Stream" app on iPhone to capture Onelap app traffic.');
-            }
-
-            await DashcamTcpService.disconnect();
-
-            if (context.mounted) {
-              showDialog(context: context, builder: (_) => _ProbeDialog('TCP Format Probe', results.join('\n')));
-            }
-          }),
-        ),
-        _SettingRow(
-          icon: Icons.sd_card_rounded,
-          label: 'Format SD Card',
-          subtitle: storage != null
-              ? '${storage!.usedDisplay} used of ${storage!.totalDisplay}'
-              : null,
-          trailing: ElevatedButton(
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: const Color(0xFF1E1E1E),
-                  title: const Text('Format SD Card',
-                      style: TextStyle(color: Colors.white, fontSize: 16)),
-                  content: const Text(
-                    'This will erase ALL files on the dashcam SD card.\n\nThis cannot be undone.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Format',
-                            style: TextStyle(color: Colors.redAccent))),
-                  ],
-                ),
-              );
-              if (ok == true) notifier.formatSD();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent, foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: Size.zero,
-            ),
-            child: const Text('Format', style: TextStyle(fontSize: 11)),
+        // Storage info
+        if (dcState.storageInfo != null) ...[
+          const SizedBox(height: 12),
+          const _SectionTitle('Storage'),
+          _SettingRow(
+            icon: Icons.sd_card_rounded,
+            label: 'SD Card',
+            subtitle: '${dcState.storageInfo!.usedDisplay} used of ${dcState.storageInfo!.totalDisplay}'
+                ' (${dcState.storageInfo!.freeDisplay} free)',
+            trailing: const SizedBox(),
           ),
-        ),
+        ],
+
+        // Device info
+        if (dcState.deviceInfo != null) ...[
+          const SizedBox(height: 12),
+          const _SectionTitle('Device Info'),
+          _InfoRow('SSID', dcState.deviceInfo!.ssid),
+          _InfoRow('UUID', dcState.deviceInfo!.uuid),
+          _InfoRow('Software', dcState.deviceInfo!.softver),
+          _InfoRow('Hardware', dcState.deviceInfo!.hwver),
+          _InfoRow('Cameras', '${dcState.deviceInfo!.camnum}'),
+        ],
       ],
     );
+  }
+}
+
+/// Dynamic setting row — built from the param schema.
+class _DynamicSetting extends ConsumerWidget {
+  final DashcamParamSchema schema;
+  final int currentValue;
+
+  const _DynamicSetting({
+    required this.schema,
+    required this.currentValue,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final meta = _paramMeta[schema.name];
+    final icon = meta?.$1 ?? Icons.tune_rounded;
+    final label = meta?.$2 ?? _prettifyName(schema.name);
+
+    // For binary on/off params, use a switch
+    if (schema.items.length == 2 &&
+        schema.items[0].toLowerCase() == 'off' &&
+        schema.items[1].toLowerCase() == 'on') {
+      return _SettingRow(
+        icon: icon,
+        label: label,
+        trailing: Switch(
+          value: currentValue == schema.index[1],
+          activeColor: const Color(0xFF4FC3F7),
+          onChanged: (v) {
+            final newVal = v ? schema.index[1] : schema.index[0];
+            ref.read(dashcamProvider.notifier).setParam(schema.name, newVal);
+          },
+        ),
+      );
+    }
+
+    // For multi-option params, use a dropdown
+    return _SettingRow(
+      icon: icon,
+      label: label,
+      trailing: DropdownButton<int>(
+        value: schema.index.contains(currentValue)
+            ? currentValue
+            : (schema.index.isNotEmpty ? schema.index.first : 0),
+        dropdownColor: const Color(0xFF222222),
+        style: const TextStyle(color: Colors.white60, fontSize: 11),
+        underline: const SizedBox(),
+        items: [
+          for (int i = 0; i < schema.items.length && i < schema.index.length; i++)
+            DropdownMenuItem(
+              value: schema.index[i],
+              child: Text(schema.items[i]),
+            ),
+        ],
+        onChanged: (v) {
+          if (v == null) return;
+          ref.read(dashcamProvider.notifier).setParam(schema.name, v);
+        },
+      ),
+    );
+  }
+
+  static String _prettifyName(String name) {
+    return name
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
   }
 }
 
@@ -937,6 +670,30 @@ class _SettingRow extends StatelessWidget {
   );
 }
 
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(children: [
+      const SizedBox(width: 26),
+      SizedBox(
+        width: 80,
+        child: Text(label,
+            style: const TextStyle(color: Colors.white30, fontSize: 11)),
+      ),
+      Expanded(
+        child: Text(value,
+            style: const TextStyle(color: Colors.white54, fontSize: 11,
+                fontFamily: 'monospace')),
+      ),
+    ]),
+  );
+}
+
 class _ActionBtn extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
@@ -945,104 +702,5 @@ class _ActionBtn extends StatelessWidget {
   Widget build(BuildContext context) => TextButton(
     onPressed: onPressed,
     child: Text(label, style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
-  );
-}
-
-class _ToggleSetting extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final int cmd;
-  const _ToggleSetting({required this.icon, required this.label, required this.cmd});
-
-  @override
-  State<_ToggleSetting> createState() => _ToggleSettingState();
-}
-
-class _ToggleSettingState extends State<_ToggleSetting> {
-  bool _value = false;
-
-  @override
-  Widget build(BuildContext context) => _SettingRow(
-    icon: widget.icon,
-    label: widget.label,
-    trailing: Switch(
-      value: _value,
-      activeColor: const Color(0xFF4FC3F7),
-      onChanged: (v) {
-        setState(() => _value = v);
-        DashcamService.setSetting(widget.cmd, v ? 1 : 0);
-      },
-    ),
-  );
-}
-
-class _DropdownSetting extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final Map<String, int> items;
-  final Future<bool> Function(int) onChanged;
-  const _DropdownSetting({
-    required this.icon, required this.label,
-    required this.items, required this.onChanged,
-  });
-
-  @override
-  State<_DropdownSetting> createState() => _DropdownSettingState();
-}
-
-class _DropdownSettingState extends State<_DropdownSetting> {
-  late int _value;
-
-  @override
-  void initState() {
-    super.initState();
-    _value = widget.items.values.first;
-  }
-
-  @override
-  Widget build(BuildContext context) => _SettingRow(
-    icon: widget.icon,
-    label: widget.label,
-    trailing: DropdownButton<int>(
-      value: _value,
-      dropdownColor: const Color(0xFF222222),
-      style: const TextStyle(color: Colors.white60, fontSize: 11),
-      underline: const SizedBox(),
-      items: [
-        for (final e in widget.items.entries)
-          DropdownMenuItem(value: e.value, child: Text(e.key)),
-      ],
-      onChanged: (v) {
-        if (v == null) return;
-        setState(() => _value = v);
-        widget.onChanged(v);
-      },
-    ),
-  );
-}
-
-// ─── Reusable probe results dialog ──────────────────────────────────────────
-
-class _ProbeDialog extends StatelessWidget {
-  final String title;
-  final String content;
-  const _ProbeDialog(this.title, this.content);
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    backgroundColor: const Color(0xFF1A1A1A),
-    title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14)),
-    content: SizedBox(
-      width: 560, height: 450,
-      child: SingleChildScrollView(
-        child: SelectableText(content,
-          style: const TextStyle(color: Colors.white60, fontSize: 10,
-              fontFamily: 'monospace')),
-      ),
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context),
-          child: const Text('Close')),
-    ],
   );
 }

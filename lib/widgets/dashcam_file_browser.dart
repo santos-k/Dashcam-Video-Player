@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../models/dashcam_file.dart';
-import '../models/dashcam_state.dart';
 import '../providers/dashcam_providers.dart';
+import 'app_notification.dart';
 
 class DashcamFileBrowser extends ConsumerWidget {
   final List<DashcamFile> files;
@@ -162,10 +164,15 @@ class _FileTileState extends ConsumerState<_FileTile> {
                 Text(fmt.format(file.timestamp!),
                     style: const TextStyle(color: Colors.white30, fontSize: 10)),
               const SizedBox(width: 6),
-              if (file.isVideo)
-                _typeBadge('Video', const Color(0xFF4FC3F7))
-              else if (file.isPhoto)
-                _typeBadge('Photo', Colors.orange),
+              if (file.isFront)
+                _typeBadge('Front', const Color(0xFF4FC3F7))
+              else if (file.isBack)
+                _typeBadge('Back', Colors.orange),
+              const SizedBox(width: 4),
+              _typeBadge(file.folderLabel,
+                  file.folder == 'emr' ? Colors.redAccent
+                  : file.folder == 'park' ? Colors.amber
+                  : Colors.white38),
             ]),
             // Download progress bar
             if (widget.isDownloading) ...[
@@ -191,7 +198,7 @@ class _FileTileState extends ConsumerState<_FileTile> {
           // Download
           _ActionIcon(Icons.download_rounded, 'Download',
               Colors.white54, () => _downloadFile(file)),
-          // Delete
+          // Delete from dashcam SD card
           _ActionIcon(Icons.delete_outline_rounded, 'Delete',
               Colors.redAccent, () => _deleteFile(file)),
         ] else
@@ -234,12 +241,12 @@ class _FileTileState extends ConsumerState<_FileTile> {
     final ok = await ref.read(dashcamProvider.notifier)
         .downloadFile(file, outDir);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Downloaded ${file.name}'
-            : 'Download failed: ${file.name}'),
-        duration: const Duration(seconds: 3),
-      ));
+      showAppNotification(
+        context,
+        ok ? 'Downloaded ${file.name}' : 'Download failed: ${file.name}',
+        icon: ok ? Icons.download_done_rounded : null,
+        type: ok ? NotificationType.success : NotificationType.error,
+      );
     }
   }
 
@@ -261,12 +268,14 @@ class _FileTileState extends ConsumerState<_FileTile> {
       ),
     );
     if (ok != true) return;
-    final success = await ref.read(dashcamProvider.notifier).deleteFile(file);
-    if (mounted && !success) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Failed to delete file'),
-        duration: Duration(seconds: 3),
-      ));
+    final success = await ref.read(dashcamProvider.notifier).deleteFile(widget.file);
+    if (mounted) {
+      showAppNotification(
+        context,
+        success ? 'Deleted ${file.name}' : 'Failed to delete ${file.name}',
+        icon: success ? Icons.delete_rounded : null,
+        type: success ? NotificationType.success : NotificationType.error,
+      );
     }
   }
 }
@@ -292,7 +301,7 @@ class _ActionIcon extends StatelessWidget {
   );
 }
 
-// ─── Simple play dialog using media_kit ─────────────────────────────────────
+// ─── Video play dialog using media_kit ──────────────────────────────────────
 
 class _PlayDialog extends StatefulWidget {
   final String url;
@@ -304,78 +313,79 @@ class _PlayDialog extends StatefulWidget {
 }
 
 class _PlayDialogState extends State<_PlayDialog> {
-  late final _player = __import_player();
-  late final _controller = __import_controller(_player);
-
-  // Lazy imports to avoid circular deps; media_kit is already a dependency
-  static dynamic __import_player() {
-    // Use media_kit Player
-    return null; // Will be replaced with actual player below
-  }
-  static dynamic __import_controller(dynamic p) => null;
+  late final Player _player;
+  late final VideoController _controller;
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    // We'll use a simple approach: show the URL for the user to open externally
-    // or integrate with the main player
+    _player = Player();
+    _controller = VideoController(_player);
+    _openVideo();
+  }
+
+  Future<void> _openVideo() async {
+    try {
+      await _player.open(Media(widget.url), play: true);
+      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) setState(() { _loading = false; _error = '$e'; });
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
     return Dialog(
       backgroundColor: const Color(0xFF1A1A1A),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Row(children: [
-            const Icon(Icons.play_circle_rounded, color: Color(0xFF4FC3F7), size: 20),
-            const SizedBox(width: 8),
-            Expanded(child: Text(widget.name,
-                style: const TextStyle(color: Colors.white, fontSize: 14,
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis)),
-            IconButton(
-              icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
-              onPressed: () => Navigator.pop(context),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ]),
-          const SizedBox(height: 16),
-          const Text(
-            'The video will stream from the dashcam via HTTP.\n'
-            'Close the dashcam overlay to use the main player.',
-            style: TextStyle(color: Colors.white38, fontSize: 12),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 12),
-          SelectableText(
-            widget.url,
-            style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11,
-                fontFamily: 'monospace'),
-          ),
-          const SizedBox(height: 16),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pop(context, widget.url);
-              },
-              icon: const Icon(Icons.play_arrow_rounded, size: 16),
-              label: const Text('Play in App'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4FC3F7),
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: SizedBox(
+        width: (screenSize.width * 0.7).clamp(400, 900),
+        height: (screenSize.height * 0.7).clamp(300, 600),
+        child: Column(children: [
+          // Title bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+            child: Row(children: [
+              const Icon(Icons.play_circle_rounded, color: Color(0xFF4FC3F7), size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(widget.name,
+                  style: const TextStyle(color: Colors.white, fontSize: 13,
+                      fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis)),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                onPressed: () => Navigator.pop(context),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
-            ),
-          ]),
+            ]),
+          ),
+          // Video area
+          Expanded(
+            child: _error != null
+                ? Center(child: Text('Playback error: $_error',
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                    textAlign: TextAlign.center))
+                : _loading
+                    ? const Center(child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Color(0xFF4FC3F7)))
+                    : Container(
+                        color: Colors.black,
+                        child: Video(
+                          controller: _controller,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+          ),
         ]),
       ),
     );

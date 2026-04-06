@@ -6,13 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:intl/intl.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import '../main.dart' show launchArgs;
 import '../models/layout_config.dart';
 import '../models/shortcut_action.dart';
 import '../models/video_pair.dart';
 import '../providers/app_providers.dart';
+import '../services/dashcam_service.dart';
+import '../utils/file_pairer.dart';
+import '../widgets/app_notification.dart';
 import '../widgets/dual_video_view.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/layout_selector.dart';
@@ -25,6 +30,8 @@ import '../models/dashcam_state.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
 import '../services/thumbnail_service.dart';
+import '../services/update_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -41,10 +48,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   bool _shiftUsedAsModifier = false;   // track Shift+key combos vs Shift alone
   bool _aboutOpen           = false;   // track About popup for toggle
   bool _dashcamOpen         = false;   // dashcam Wi-Fi overlay
+  bool _isDragging          = false;   // file drag hover state
   Timer? _hideTimer;                   // auto-hide controls after inactivity
   final FocusNode _focusNode    = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _layoutBtnKey = GlobalKey();
+  final GlobalKey<DualVideoViewState> _videoViewKey = GlobalKey<DualVideoViewState>();
+  final GlobalKey<PlaybackControlsState> _controlsKey = GlobalKey<PlaybackControlsState>();
 
   @override
   void initState() {
@@ -52,7 +62,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     WakelockPlus.enable();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
-      ref.read(playbackProvider.notifier).onClipEnd = _onClipEnd;
+      final pn = ref.read(playbackProvider.notifier);
+      pn.onClipEnd = _onClipEnd;
+      pn.onDurationResolved = (id, dur) {
+        final cache = Map.of(ref.read(clipDurationCacheProvider));
+        cache[id] = dur;
+        ref.read(clipDurationCacheProvider.notifier).state = cache;
+      };
+      // Handle file/folder passed via command-line (file association / "Open with")
+      if (launchArgs.isNotEmpty) {
+        _openPaths(launchArgs);
+      }
     });
   }
 
@@ -62,6 +82,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     WakelockPlus.disable();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Show a top-right slide-in notification (replaces SnackBar).
+  void _showNotification(BuildContext ctx, String message, {
+    IconData? icon,
+    Color? color,
+    NotificationType type = NotificationType.success,
+  }) {
+    showAppNotification(ctx, message, icon: icon, color: color, type: type);
   }
 
   void _resetHideTimer() {
@@ -207,23 +236,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       case ShortcutAction.muteFront:
         if (!playback.isLoaded) return;
         if (playback.hasFront && !playback.hasBack) {
-          final next = !ref.read(frontMutedProvider);
-          ref.read(frontMutedProvider.notifier).state = next;
-          notifier.setFrontMuted(next);
+          final cur = ref.read(frontVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(frontVolumeProvider.notifier).state = next;
+          notifier.setFrontVolume(next);
         } else if (!playback.hasFront && playback.hasBack) {
-          final next = !ref.read(backMutedProvider);
-          ref.read(backMutedProvider.notifier).state = next;
-          notifier.setBackMuted(next);
+          final cur = ref.read(backVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(backVolumeProvider.notifier).state = next;
+          notifier.setBackVolume(next);
         } else {
-          final next = !ref.read(frontMutedProvider);
-          ref.read(frontMutedProvider.notifier).state = next;
-          notifier.setFrontMuted(next);
+          final cur = ref.read(frontVolumeProvider);
+          final next = cur > 0 ? 0.0 : 100.0;
+          ref.read(frontVolumeProvider.notifier).state = next;
+          notifier.setFrontVolume(next);
         }
       case ShortcutAction.muteBack:
         if (!playback.isLoaded) return;
-        final next = !ref.read(backMutedProvider);
-        ref.read(backMutedProvider.notifier).state = next;
-        notifier.setBackMuted(next);
+        final cur = ref.read(backVolumeProvider);
+        final next = cur > 0 ? 0.0 : 100.0;
+        ref.read(backVolumeProvider.notifier).state = next;
+        notifier.setBackVolume(next);
       case ShortcutAction.speedUp:
         if (!playback.isLoaded) return;
         final cur = ref.read(playbackSpeedProvider);
@@ -246,10 +279,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         if (!playback.isLoaded) return;
         ref.read(playbackSpeedProvider.notifier).state = 1.0;
         notifier.setSpeed(1.0);
+      case ShortcutAction.syncToggle:
+        _controlsKey.currentState?.toggleSync();
       case ShortcutAction.layoutSideBySide:
         if (!playback.hasFront || !playback.hasBack) return;
+        final sbsConfig = ref.read(layoutConfigProvider);
+        final nextMode = sbsConfig.mode == LayoutMode.sideBySide
+            ? LayoutMode.stacked
+            : LayoutMode.sideBySide;
         ref.read(layoutConfigProvider.notifier).state =
-            ref.read(layoutConfigProvider).copyWith(mode: LayoutMode.sideBySide);
+            sbsConfig.copyWith(mode: nextMode);
       case ShortcutAction.layoutStacked:
         if (!playback.hasFront || !playback.hasBack) return;
         ref.read(layoutConfigProvider.notifier).state =
@@ -265,6 +304,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               ? PipPrimary.back : PipPrimary.front;
           ref.read(layoutConfigProvider.notifier).state =
               config.copyWith(pipPrimary: next);
+        }
+      case ShortcutAction.layoutFrontOnly:
+        if (!playback.hasFront || !playback.hasBack) return;
+        final soloConfig = ref.read(layoutConfigProvider);
+        if (soloConfig.mode == LayoutMode.frontOnly) {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig.copyWith(mode: LayoutMode.backOnly);
+        } else {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig.copyWith(mode: LayoutMode.frontOnly);
+        }
+      case ShortcutAction.layoutBackOnly:
+        if (!playback.hasFront || !playback.hasBack) return;
+        final soloConfig2 = ref.read(layoutConfigProvider);
+        if (soloConfig2.mode == LayoutMode.backOnly) {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig2.copyWith(mode: LayoutMode.frontOnly);
+        } else {
+          ref.read(layoutConfigProvider.notifier).state =
+              soloConfig2.copyWith(mode: LayoutMode.backOnly);
         }
       case ShortcutAction.layoutPopup:
         if (!playback.hasFront || !playback.hasBack) return;
@@ -298,6 +357,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         _toggleFullscreen();
       case ShortcutAction.shortcutSettings:
         _showShortcutSettings();
+      case ShortcutAction.zoomIn:
+        _videoViewKey.currentState?.zoomIn();
+      case ShortcutAction.zoomOut:
+        _videoViewKey.currentState?.zoomOut();
+      case ShortcutAction.zoomReset:
+        _videoViewKey.currentState?.resetZoom();
+      case ShortcutAction.wifiDashcam:
+        setState(() => _dashcamOpen = !_dashcamOpen);
+        appLog('Shortcut', 'N – toggle Wi-Fi dashcam');
       case ShortcutAction.clipList:
       case ShortcutAction.mapSidebar:
       case ShortcutAction.about:
@@ -329,21 +397,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     });
   }
 
-  void _goTo(int index, {bool autoPlay = true}) {
+  Future<void> _goTo(int index, {bool autoPlay = true}) async {
     final pairs = ref.read(videoPairListProvider);
     if (index < 0 || index >= pairs.length) return;
     appLog('Playback', 'Go to clip ${index + 1}/${pairs.length} (autoPlay=$autoPlay)');
     ref.read(currentIndexProvider.notifier).state = index;
     ref.read(syncOffsetProvider.notifier).state   = 0;
     final speed = ref.read(playbackSpeedProvider);
-    ref.read(playbackProvider.notifier)
-        .loadPair(pairs[index], 0, autoPlay: autoPlay)
-        .then((_) {
-      // Re-apply current speed to the new clip
-      if (speed != 1.0) {
-        ref.read(playbackProvider.notifier).setSpeed(speed);
+    final pair = pairs[index];
+
+    // Compute sync offset: try GPS timestamps first, fall back to filename offset
+    int syncOffset = pair.syncOffsetMs; // filename-based default
+    if (pair.isPaired &&
+        pair.frontPath != null && pair.frontPath!.toLowerCase().endsWith('.ts') &&
+        pair.backPath != null && pair.backPath!.toLowerCase().endsWith('.ts')) {
+      final gpsOffset = await ExportService.computeGpsSyncOffset(
+          pair.frontPath!, pair.backPath!);
+      if (gpsOffset != 0) {
+        syncOffset = gpsOffset;
+        appLog('Playback', 'GPS sync offset: ${gpsOffset}ms');
       }
-    });
+    }
+    if (syncOffset != 0) {
+      ref.read(syncOffsetProvider.notifier).state = syncOffset;
+    }
+
+    await ref.read(playbackProvider.notifier)
+        .loadPair(pair, syncOffset, autoPlay: autoPlay);
+
+    if (speed != 1.0) {
+      ref.read(playbackProvider.notifier).setSpeed(speed);
+    }
   }
 
   void _onClipEnd() {
@@ -365,30 +449,71 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _focusNode.requestFocus();
       return;
     }
+    await _openPaths([result]);
+  }
+
+  Future<void> _pickFile() async {
+    appLog('File', 'Opening file picker');
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Select video file(s)',
+      type: FileType.custom,
+      allowedExtensions: [
+        'mp4', 'mov', 'avi', 'mkv', 'ts', 'webm', 'flv',
+        'wmv', 'm4v', '3gp', 'mts', 'm2ts', 'vob', 'ogv',
+        'mpg', 'mpeg', 'divx', 'f4v', 'asf',
+      ],
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) {
+      _focusNode.requestFocus();
+      return;
+    }
+    final paths = result.files
+        .where((f) => f.path != null)
+        .map((f) => f.path!)
+        .toList();
+    await _openPaths(paths);
+  }
+
+  /// Shared handler for opening files/folders from any source:
+  /// folder picker, drag & drop, or command-line arguments.
+  Future<void> _openPaths(List<String> paths) async {
+    if (paths.isEmpty) return;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Row(children: [
-          SizedBox(width: 16, height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-          SizedBox(width: 12),
-          Text('Scanning for dashcam videos...'),
-        ]),
-        duration: Duration(seconds: 30),
-      ));
+      _showNotification(context, 'Scanning for dashcam videos...',
+          icon: Icons.search_rounded, type: NotificationType.warning);
     }
 
-    appLog('Folder', 'Scanning: $result');
-    await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(result));
-    if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    final firstPath = paths.first;
+    final isDir = FileSystemEntity.isDirectorySync(firstPath);
+
+    if (isDir) {
+      appLog('Folder', 'Scanning: $firstPath');
+      await ref.read(videoPairListProvider.notifier).loadFromRoot(Directory(firstPath));
+    } else {
+      // Filter to supported video files
+      final videoFiles = paths
+          .where((p) => FileSystemEntity.isFileSync(p) && FilePairer.isVideoFile(p))
+          .map((p) => File(p))
+          .toList();
+      if (videoFiles.isEmpty) {
+        if (mounted) {
+          _showNotification(context, 'No supported video files found',
+              type: NotificationType.warning);
+        }
+        _focusNode.requestFocus();
+        return;
+      }
+      appLog('Files', 'Loading ${videoFiles.length} video file(s)');
+      ref.read(videoPairListProvider.notifier).loadFiles(videoFiles);
+    }
 
     final pairs = ref.read(videoPairListProvider);
     if (pairs.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('No dashcam videos found in $result'),
-          duration: const Duration(seconds: 4),
-        ));
+        _showNotification(context, 'No dashcam videos found in $firstPath',
+            type: NotificationType.warning);
       }
       _focusNode.requestFocus();
       return;
@@ -399,11 +524,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final backOnly  = pairs.where((p) => p.hasBack  && !p.hasFront).length;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          '${pairs.length} clips  ($paired paired · $frontOnly front-only · $backOnly back-only)'),
-        duration: const Duration(seconds: 3),
-      ));
+      _showNotification(context,
+          '${pairs.length} clips  ($paired paired, $frontOnly front-only, $backOnly back-only)',
+          icon: Icons.folder_open_rounded);
     }
 
     ref.read(currentIndexProvider.notifier).state = 0;
@@ -424,14 +547,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _toggleMapSidebar() {
-    if (_mapSidebarOpen) {
-      appLog('Shortcut', 'M – close map sidebar');
-      Navigator.of(context).maybePop();
-      _focusNode.requestFocus();
-    } else {
-      appLog('Shortcut', 'M – open map sidebar');
-      _scaffoldKey.currentState?.openEndDrawer();
-    }
+    setState(() {
+      _mapSidebarOpen = !_mapSidebarOpen;
+      appLog('Shortcut', 'M – ${_mapSidebarOpen ? "open" : "close"} map overlay');
+    });
   }
 
   void _showLayoutPopup() {
@@ -463,8 +582,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(currentIndexProvider.notifier).state = 0;
     ref.read(syncOffsetProvider.notifier).state = 0;
     ref.read(playbackSpeedProvider.notifier).state = 1.0;
-    ref.read(frontMutedProvider.notifier).state = false;
-    ref.read(backMutedProvider.notifier).state = false;
+    ref.read(frontVolumeProvider.notifier).state = 100.0;
+    ref.read(backVolumeProvider.notifier).state = 100.0;
     _focusNode.requestFocus();
   }
 
@@ -529,20 +648,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     ref.read(exportProgressProvider.notifier).state = null;
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(exportOk
-            ? 'Exported to $savePath'
-            : 'Export failed — is FFmpeg installed?'),
-        duration: const Duration(seconds: 5),
-        showCloseIcon: true,
-        closeIconColor: Colors.white54,
-        action: exportOk
-            ? SnackBarAction(
-                label: 'Open folder',
-                onPressed: () => Process.run('explorer', ['/select,', savePath]),
-              )
-            : null,
-      ));
+      if (exportOk) {
+        _showNotification(context, 'Exported to $savePath',
+            icon: Icons.movie_creation_rounded);
+        // Open folder in explorer
+        Process.run('explorer', ['/select,', savePath]);
+      } else {
+        _showNotification(context, 'Export failed — is FFmpeg installed?',
+            type: NotificationType.error);
+      }
     }
     _focusNode.requestFocus();
   }
@@ -601,22 +715,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     for (final idx in selected) {
       final pair = pairs[idx];
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
-          await file.copy(dest);
-          copied++;
-          ref.read(savingClipsProvider.notifier).state =
-              '$copied/$totalFiles saved';
-        } catch (e) {
-          debugPrint('Copy failed: $e');
-          failed++;
+
+      if (pair.isRemote) {
+        // WiFi dashcam files — download via HTTP
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final fileName = Uri.parse(url).pathSegments.last;
+          final dest = '$outDir${Platform.pathSeparator}$fileName';
+          try {
+            final ok = await DashcamService.downloadFile(
+              remotePath: Uri.parse(url).path,
+              localPath: dest,
+              fileSize: 0,
+              onProgress: (_) {},
+            );
+            if (ok) { copied++; } else { failed++; }
+            ref.read(savingClipsProvider.notifier).state =
+                '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Download failed: $e');
+            failed++;
+          }
+        }
+      } else {
+        // Local files — copy
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+            await file.copy(dest);
+            copied++;
+            ref.read(savingClipsProvider.notifier).state =
+                '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Copy failed: $e');
+            failed++;
+          }
         }
       }
     }
 
-    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    appLog('Save', 'Saved $copied file(s), $failed failed → $outDir');
     ref.read(savingClipsProvider.notifier).state = null;
     _focusNode.requestFocus();
   }
@@ -668,20 +807,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return;
     }
 
-    // Delete files from disk
+    // Delete files from disk or dashcam
     int deleted = 0, failed = 0;
     for (final idx in toDelete) {
       final pair = pairs[idx];
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          if (await file.exists()) {
-            await file.delete();
-            deleted++;
+      if (pair.isRemote) {
+        // WiFi dashcam files — delete via API
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final remotePath = Uri.parse(url).path; // e.g. /mnt/card/video_front/...
+          final ok = await DashcamService.deleteFile(remotePath);
+          if (ok) { deleted++; } else { failed++; }
+        }
+      } else {
+        // Local files — delete from disk
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            if (await file.exists()) {
+              await file.delete();
+              deleted++;
+            }
+          } catch (e) {
+            debugPrint('Delete failed: $e');
+            failed++;
           }
-        } catch (e) {
-          debugPrint('Delete failed: $e');
-          failed++;
         }
       }
     }
@@ -708,11 +858,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Deleted $deleted file${deleted != 1 ? "s" : ""}'
-            '${failed > 0 ? " ($failed failed)" : ""}'),
-        duration: const Duration(seconds: 3),
-      ));
+      final msg = deleted > 0
+          ? 'Deleted $deleted file${deleted != 1 ? "s" : ""}'
+              '${failed > 0 ? " ($failed failed)" : ""}'
+          : 'Delete failed';
+      _showNotification(context, msg,
+          icon: deleted > 0 ? Icons.delete_rounded : null,
+          type: deleted > 0 ? NotificationType.success : NotificationType.error);
     }
     _focusNode.requestFocus();
   }
@@ -750,21 +902,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     for (final idx in selected) {
       final pair = pairs[idx];
-      for (final file in [pair.frontFile, pair.backFile]) {
-        if (file == null) continue;
-        try {
-          final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
-          await file.copy(dest);
-          copied++;
-          ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
-        } catch (e) {
-          debugPrint('Copy failed: $e');
-          failed++;
+
+      if (pair.isRemote) {
+        // WiFi dashcam files — download via HTTP
+        for (final url in [pair.frontUrl, pair.backUrl]) {
+          if (url == null) continue;
+          final fileName = Uri.parse(url).pathSegments.last;
+          final dest = '$outDir${Platform.pathSeparator}$fileName';
+          try {
+            final ok = await DashcamService.downloadFile(
+              remotePath: Uri.parse(url).path,
+              localPath: dest,
+              fileSize: 0,
+              onProgress: (_) {},
+            );
+            if (ok) { copied++; } else { failed++; }
+            ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Download failed: $e');
+            failed++;
+          }
+        }
+      } else {
+        for (final file in [pair.frontFile, pair.backFile]) {
+          if (file == null) continue;
+          try {
+            final dest = '$outDir${Platform.pathSeparator}${file.uri.pathSegments.last}';
+            await file.copy(dest);
+            copied++;
+            ref.read(savingClipsProvider.notifier).state = '$copied/$totalFiles saved';
+          } catch (e) {
+            debugPrint('Copy failed: $e');
+            failed++;
+          }
         }
       }
     }
 
-    appLog('Save', 'Copied $copied file(s), $failed failed → $outDir');
+    appLog('Save', 'Saved $copied file(s), $failed failed → $outDir');
     ref.read(savingClipsProvider.notifier).state = null;
 
     // Clear selection
@@ -798,21 +973,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
         key: _scaffoldKey,
         backgroundColor: Colors.black,
         onEndDrawerChanged: (open) {
-          _mapSidebarOpen = open;
           if (!open) _focusNode.requestFocus();
         },
-        drawer: ClipListDrawer(
+        drawer: pairs.isNotEmpty ? ClipListDrawer(
           onSelect: (i) {
             _goTo(i, autoPlay: true);
           },
           onSave:   _saveFromDrawer,
           onDelete:  _deleteFromDrawer,
-        ),
-        endDrawer: MapSidebar(
-          videoPath: mapVideoPath,
-          onClose: () => _focusNode.requestFocus(),
-        ),
-        body: MouseRegion(
+        ) : null,
+        endDrawer: null,
+        body: pairs.isEmpty
+          ? _buildLandingBody()
+          : MouseRegion(
           onHover: (_) => _resetHideTimer(),
           child: Column(children: [
           // Top bar — collapses when hidden so video fills space
@@ -843,8 +1016,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 }
               },
               child: Stack(children: [
-                const DualVideoView(),
-                if (pairs.isEmpty) _EmptyState(onOpen: _pickFolder),
+                Row(children: [
+                  Expanded(child: DualVideoView(key: _videoViewKey)),
+                  if (_mapSidebarOpen)
+                    MapPanel(
+                      videoPath: mapVideoPath,
+                      onClose: () {
+                        setState(() => _mapSidebarOpen = false);
+                        _focusNode.requestFocus();
+                      },
+                    ),
+                ]),
                 // About overlay — rendered in-widget so I key toggle works
                 if (_aboutOpen)
                   GestureDetector(
@@ -885,6 +1067,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             duration: const Duration(milliseconds: 200),
             child: _overlayVisible
                 ? PlaybackControls(
+                    key: _controlsKey,
                     onPrevious:     () => _goTo(ref.read(currentIndexProvider) - 1, autoPlay: true),
                     onNext:         () => _goTo(ref.read(currentIndexProvider) + 1, autoPlay: true),
                     onFolder:       _pickFolder,
@@ -894,12 +1077,479 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     onCloseFolder:  _confirmCloseFolder,
                     onQuit:         _confirmQuit,
                     onMap:          _toggleMapSidebar,
+                    onZoomIn:       () => _videoViewKey.currentState?.zoomIn(),
+                    onZoomOut:      () => _videoViewKey.currentState?.zoomOut(),
                     focusRequester: _focusNode.requestFocus,
                   )
                 : const SizedBox.shrink(),
           ),
         ]),
         ),
+      ),
+    );
+  }
+
+  // ─── Landing page (no clips loaded) ─────────────────────────────────────────
+
+  Widget _buildLandingBody() {
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _isDragging = true),
+      onDragExited:  (_) => setState(() => _isDragging = false),
+      onDragDone: (details) {
+        setState(() => _isDragging = false);
+        final paths = details.files.map((f) => f.path).toList();
+        _openPaths(paths);
+      },
+      child: Row(
+      children: [
+        // ─── Left Sidebar ───
+        Container(
+          width: 200,
+          decoration: const BoxDecoration(
+            color: Color(0xFF0D1117),
+            border: Border(right: BorderSide(color: Color(0xFF1E2630))),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // App branding
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4FC3F7).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.videocam_rounded,
+                        color: Color(0xFF4FC3F7), size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('DashCam Player',
+                      style: TextStyle(color: Colors.white, fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+              // Navigation items
+              _landingNavItem(Icons.folder_rounded, 'Library', true, _pickFolder),
+              _landingNavItem(Icons.access_time_rounded, 'Recent Videos', false, null),
+              _landingNavItem(Icons.location_on_outlined, 'Map View', false, null),
+              _landingNavItem(Icons.settings_outlined, 'Settings', false, _showShortcutSettings),
+              const Spacer(),
+            ],
+          ),
+        ),
+
+        // ─── Main Content ───
+        Expanded(
+          child: Column(children: [
+            // Top bar with action icons
+            Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.search_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: () {},
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.help_outline_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: _showAbout,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.notifications_none_rounded,
+                        color: Colors.white38, size: 20),
+                    onPressed: () {},
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined,
+                        color: Colors.white38, size: 20),
+                    onPressed: _showShortcutSettings,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Hero area
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF0A1628),
+                      Color(0xFF0F1D32),
+                      Color(0xFF0A1628),
+                      Color(0xFF060C16),
+                    ],
+                  ),
+                ),
+                child: Stack(children: [
+                  // Subtle atmosphere lines
+                  Positioned.fill(
+                    child: CustomPaint(painter: _RoadAtmospherePainter()),
+                  ),
+                  // Center content
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Layout mode toggle (Front | Split | Rear)
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: Colors.black26,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _landingLayoutTab(Icons.videocam_outlined, 'Front', false),
+                              _landingLayoutTab(Icons.view_column_outlined, 'Split', true),
+                              _landingLayoutTab(Icons.videocam_outlined, 'Rear', false),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 48),
+                        // Download icon in bordered box
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: _isDragging
+                                  ? const Color(0xFF4FC3F7)
+                                  : const Color(0xFF4FC3F7).withValues(alpha: 0.3),
+                              width: _isDragging ? 2.0 : 1.5,
+                            ),
+                            color: _isDragging
+                                ? const Color(0xFF4FC3F7).withValues(alpha: 0.15)
+                                : const Color(0xFF4FC3F7).withValues(alpha: 0.06),
+                          ),
+                          child: Icon(
+                            _isDragging ? Icons.file_download_rounded : Icons.download_rounded,
+                            color: const Color(0xFF4FC3F7), size: 32),
+                        ),
+                        const SizedBox(height: 28),
+                        // Open Dashcam Folder button
+                        ElevatedButton.icon(
+                          onPressed: _pickFolder,
+                          icon: const Icon(Icons.add_rounded, size: 20),
+                          label: const Text('Open Dashcam Folder',
+                              style: TextStyle(fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4FC3F7),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 32, vertical: 16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            elevation: 8,
+                            shadowColor:
+                                const Color(0xFF4FC3F7).withValues(alpha: 0.3),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _pickFile,
+                          icon: const Icon(Icons.video_file_outlined, size: 18),
+                          label: const Text('Open Video File',
+                              style: TextStyle(fontSize: 14,
+                                  fontWeight: FontWeight.w500)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF4FC3F7),
+                            side: BorderSide(
+                                color: const Color(0xFF4FC3F7).withValues(alpha: 0.4)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 28, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: _isDragging
+                                ? const Color(0xFF4FC3F7)
+                                : Colors.white.withValues(alpha: 0.35),
+                            fontSize: 13,
+                            fontWeight: _isDragging ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                          child: Text(_isDragging
+                              ? 'Drop to open'
+                              : 'or Drag & Drop videos here'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Drag overlay border
+                  if (_isDragging)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          margin: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: const Color(0xFF4FC3F7).withValues(alpha: 0.5),
+                              width: 2,
+                            ),
+                            color: const Color(0xFF4FC3F7).withValues(alpha: 0.04),
+                          ),
+                        ),
+                      ),
+                    ),
+                ]),
+              ),
+            ),
+
+            // Quick action cards — row 1
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              child: Row(children: [
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.history_rounded,
+                  const Color(0xFF4FC3F7),
+                  'Resume Last Session',
+                  'Start where you left off',
+                  _pickFolder,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.folder_open_rounded,
+                  const Color(0xFF26A69A),
+                  'Open Recent Folder',
+                  'Browse dashcam folders',
+                  _pickFolder,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.movie_creation_outlined,
+                  const Color(0xFF5C6BC0),
+                  'Export Last Clip',
+                  'MP4 video export',
+                  null,
+                )),
+              ]),
+            ),
+            // Quick action cards — row 2
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Row(children: [
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.wifi_rounded,
+                  const Color(0xFF42A5F5),
+                  'Connect Wi-Fi Dashcam',
+                  'Download from camera',
+                  () => setState(() => _dashcamOpen = !_dashcamOpen),
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.route_rounded,
+                  const Color(0xFFEF5350),
+                  'View GPS Route',
+                  'Map & location data',
+                  null,
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: _landingActionCard(
+                  Icons.keyboard_rounded,
+                  const Color(0xFFAB47BC),
+                  'Keyboard Shortcuts',
+                  'View all shortcuts',
+                  _showShortcutSettings,
+                )),
+              ]),
+            ),
+
+            // Bottom controls bar (disabled placeholder)
+            Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0A0A0A),
+                border: Border(top: BorderSide(color: Color(0xFF1A1A1A))),
+              ),
+              child: Row(children: [
+                const Icon(Icons.replay_10_rounded,
+                    color: Colors.white12, size: 20),
+                const SizedBox(width: 12),
+                Icon(Icons.play_arrow_rounded,
+                    color: Colors.white.withValues(alpha: 0.16), size: 28),
+                const SizedBox(width: 12),
+                const Icon(Icons.forward_10_rounded,
+                    color: Colors.white12, size: 20),
+                const SizedBox(width: 16),
+                const Icon(Icons.volume_up_rounded,
+                    color: Colors.white12, size: 18),
+                const SizedBox(width: 16),
+                // Progress bar
+                Expanded(
+                  child: Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text('00:00',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        fontSize: 12,
+                        fontFamily: 'monospace')),
+                const SizedBox(width: 12),
+                Text('00:00',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        fontSize: 12,
+                        fontFamily: 'monospace')),
+              ]),
+            ),
+          ]),
+        ),
+      ],
+    ),
+    );
+  }
+
+  Widget _landingNavItem(
+      IconData icon, String label, bool selected, VoidCallback? onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF4FC3F7).withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(icon,
+                color: selected
+                    ? const Color(0xFF4FC3F7)
+                    : Colors.white38,
+                size: 18),
+            const SizedBox(width: 12),
+            Text(label,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _landingActionCard(IconData icon, Color color, String title,
+      String subtitle, VoidCallback? onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Opacity(
+          opacity: onTap != null ? 1.0 : 0.5,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111820),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF1E2630)),
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.35),
+                          fontSize: 11)),
+                ],
+              )),
+              Icon(Icons.chevron_right_rounded,
+                  color: Colors.white.withValues(alpha: 0.2), size: 18),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _landingLayoutTab(IconData icon, String label, bool selected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? const Color(0xFF4FC3F7) : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon,
+              size: 14,
+              color: selected ? Colors.black : Colors.white38),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                color: selected ? Colors.black : Colors.white38,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              )),
+        ],
       ),
     );
   }
@@ -923,9 +1573,19 @@ class _MinimalTopBar extends ConsumerWidget {
     this.onDashcam,
   });
 
+  static String _extractFileName(String? path) {
+    if (path == null || path.isEmpty) return '';
+    final sep = path.contains('\\') ? '\\' : '/';
+    return path.split(sep).last;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sc = ref.watch(shortcutConfigProvider);
+    final currentPair = ref.watch(currentPairProvider);
+    final currentFileName = currentPair != null
+        ? _extractFileName(currentPair.frontPath ?? currentPair.backPath)
+        : '';
 
     return Container(
       color: const Color(0xCC000000),
@@ -934,70 +1594,79 @@ class _MinimalTopBar extends ConsumerWidget {
         left: 4, right: 4, bottom: 2,
       ),
       child: Row(children: [
-        Builder(
-          builder: (ctx) => IconButton(
-            icon:    const Icon(Icons.menu_rounded, color: Colors.white60),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-            tooltip: 'Clip list (${sc.label(ShortcutAction.clipList)})',
-            iconSize: 20,
-          ),
-        ),
-        const Text('DashCam Player',
-          style: TextStyle(color: Colors.white70, fontSize: 14,
-              fontWeight: FontWeight.w600)),
-        if (clipCount > 0) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
+        // Left: menu + title + badge + filename (takes remaining space)
+        Expanded(
+          child: Row(children: [
+            Builder(
+              builder: (ctx) => IconButton(
+                icon: const Icon(Icons.menu_rounded, color: Colors.white60),
+                onPressed: () => Scaffold.of(ctx).openDrawer(),
+                tooltip: 'Clip list (${sc.label(ShortcutAction.clipList)})',
+                iconSize: 20,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(),
+              ),
             ),
-            child: Text('$clipCount clips',
-              style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 10)),
-          ),
-        ],
-        const Spacer(),
+            const SizedBox(width: 4),
+            const Text('DashCam Player',
+              style: TextStyle(color: Colors.white70, fontSize: 14,
+                  fontWeight: FontWeight.w600)),
+            if (clipCount > 0) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4FC3F7).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('$clipCount clips',
+                  style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 10)),
+              ),
+            ],
+            if (currentFileName.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(currentFileName,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ]),
+        ),
+        // Right: action icons (fixed, always top-right)
         _DashcamStatusBtn(onTap: onDashcam),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: 'Keyboard shortcuts',
-          child: IconButton(
-            icon: const Icon(Icons.keyboard_rounded, color: Colors.white38),
-            onPressed: onShortcutSettings,
-            iconSize: 18,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+        IconButton(
+          icon: const Icon(Icons.keyboard_rounded, color: Colors.white38),
+          onPressed: onShortcutSettings,
+          tooltip: 'Keyboard shortcuts',
+          iconSize: 18,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: 'About (${sc.label(ShortcutAction.about)})',
-          child: IconButton(
-            icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
-            onPressed: onAbout,
-            iconSize: 18,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+        IconButton(
+          icon: const Icon(Icons.info_outline_rounded, color: Colors.white38),
+          onPressed: onAbout,
+          tooltip: 'About (${sc.label(ShortcutAction.about)})',
+          iconSize: 18,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
-        const SizedBox(width: 2),
-        Tooltip(
-          message: isFullscreen
+        IconButton(
+          icon: Icon(
+            isFullscreen
+                ? Icons.fullscreen_exit_rounded
+                : Icons.fullscreen_rounded,
+            color: Colors.white54,
+          ),
+          onPressed: onToggleFullscreen,
+          tooltip: isFullscreen
               ? 'Exit fullscreen (${sc.label(ShortcutAction.fullscreen)})'
               : 'Fullscreen (${sc.label(ShortcutAction.fullscreen)})',
-          child: IconButton(
-            icon: Icon(
-              isFullscreen
-                  ? Icons.fullscreen_exit_rounded
-                  : Icons.fullscreen_rounded,
-              color: Colors.white54,
-            ),
-            onPressed: onToggleFullscreen,
-            iconSize: 20,
-            padding: const EdgeInsets.all(6),
-            constraints: const BoxConstraints(),
-          ),
+          iconSize: 20,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
         ),
         const SizedBox(width: 4),
       ]),
@@ -1033,8 +1702,40 @@ class _DashcamStatusBtn extends ConsumerWidget {
 
 // ─── About panel (in-widget overlay, not a dialog) ───────────────────────────
 
-class _AboutPanel extends StatelessWidget {
+class _AboutPanel extends StatefulWidget {
   const _AboutPanel();
+
+  @override
+  State<_AboutPanel> createState() => _AboutPanelState();
+}
+
+class _AboutPanelState extends State<_AboutPanel> {
+  UpdateInfo? _updateInfo;
+  bool _checking = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkForUpdate();
+  }
+
+  Future<void> _checkForUpdate() async {
+    setState(() { _checking = true; _error = null; });
+    try {
+      final info = await UpdateService.checkForUpdate();
+      if (mounted) setState(() { _updateInfo = info; _checking = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Could not check for updates'; _checking = false; });
+    }
+  }
+
+  void _openDownload() {
+    final url = _updateInfo?.downloadUrl ?? _updateInfo?.htmlUrl;
+    if (url != null) {
+      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1071,7 +1772,7 @@ class _AboutPanel extends StatelessWidget {
                 Text('DashCam Player',
                     style: TextStyle(color: Colors.white, fontSize: 16,
                         fontWeight: FontWeight.w700)),
-                Text('v2.0.0  \u00b7  Desktop',
+                Text('v3.1.0  \u00b7  Desktop',
                     style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
               ],
             ),
@@ -1080,15 +1781,25 @@ class _AboutPanel extends StatelessWidget {
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 14),
           const _Af(Icons.play_circle_outline_rounded, 'Synchronized dual-camera playback'),
-          const _Af(Icons.view_quilt_rounded, 'Side-by-side, Stacked & PIP layouts'),
+          const _Af(Icons.view_quilt_rounded, 'Side-by-side, Stacked, PIP & Front/Back Only'),
           const _Af(Icons.picture_in_picture_rounded, 'Draggable & resizable PIP overlay'),
-          const _Af(Icons.speed_rounded, 'Variable speed playback (0.1x \u2013 5x)'),
-          const _Af(Icons.map_rounded, 'GPS & interactive OpenStreetMap'),
+          const _Af(Icons.drag_indicator_rounded, 'Drag & drop, file picker & Open With support'),
+          const _Af(Icons.speed_rounded, 'Zoom & variable speed playback (0.1x \u2013 5x)'),
+          const _Af(Icons.map_rounded, 'Live GPS tracking on interactive map'),
+          const _Af(Icons.sync_rounded, 'Auto-sync paired videos via GPS timestamps'),
+          const _Af(Icons.wifi_rounded, 'Wi-Fi dashcam live streaming & control'),
+          const _Af(Icons.video_file_rounded, 'All video formats & recursive folder scan'),
           const _Af(Icons.movie_creation_rounded, 'FFmpeg video export & composition'),
           const _Af(Icons.save_alt_rounded, 'Batch save clips with progress'),
-          const _Af(Icons.sync_rounded, 'Manual audio sync offset (\u00b15s)'),
-          const _Af(Icons.keyboard_rounded, '20+ keyboard shortcuts'),
+          const _Af(Icons.keyboard_rounded, '30+ customizable keyboard shortcuts'),
           const SizedBox(height: 14),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 12),
+
+          // ── Update checker section ──
+          _buildUpdateSection(),
+
+          const SizedBox(height: 10),
           const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 10),
           const Text('Built with Flutter & media_kit',
@@ -1098,6 +1809,89 @@ class _AboutPanel extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildUpdateSection() {
+    if (_checking) {
+      return const Row(children: [
+        SizedBox(width: 14, height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2,
+              color: Color(0xFF4FC3F7))),
+        SizedBox(width: 10),
+        Text('Checking for updates...',
+            style: TextStyle(color: Colors.white54, fontSize: 12)),
+      ]);
+    }
+
+    if (_error != null) {
+      return Row(children: [
+        const Icon(Icons.cloud_off_rounded, color: Colors.white38, size: 14),
+        const SizedBox(width: 10),
+        Expanded(child: Text(_error!,
+            style: const TextStyle(color: Colors.white38, fontSize: 12))),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: _checkForUpdate,
+          child: const Text('Retry',
+              style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 12)),
+        ),
+      ]);
+    }
+
+    if (_updateInfo != null && _updateInfo!.hasUpdate) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF4FC3F7).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF4FC3F7).withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.system_update_rounded,
+                  color: Color(0xFF4FC3F7), size: 16),
+              const SizedBox(width: 8),
+              Text('v${_updateInfo!.latestVersion} available',
+                  style: const TextStyle(color: Color(0xFF4FC3F7),
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+            ]),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 30,
+              child: ElevatedButton.icon(
+                onPressed: _openDownload,
+                icon: const Icon(Icons.download_rounded, size: 14),
+                label: const Text('Download Update', style: TextStyle(fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4FC3F7),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Up to date
+    return Row(children: [
+      const Icon(Icons.check_circle_outline_rounded,
+          color: Color(0xFF66BB6A), size: 14),
+      const SizedBox(width: 10),
+      const Expanded(child: Text('You\'re on the latest version',
+          style: TextStyle(color: Colors.white54, fontSize: 12))),
+      GestureDetector(
+        onTap: _checkForUpdate,
+        child: const Icon(Icons.refresh_rounded,
+            color: Colors.white38, size: 14),
+      ),
+    ]);
   }
 }
 
@@ -1169,167 +1963,33 @@ class _ConfirmDialog extends StatelessWidget {
 
 // ─── Landing page (empty state) ─────────────────────────────────────────────
 
-class _EmptyState extends ConsumerWidget {
-  final VoidCallback onOpen;
-  const _EmptyState({required this.onOpen});
-
+class _RoadAtmospherePainter extends CustomPainter {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sc = ref.watch(shortcutConfigProvider);
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..strokeWidth = 1;
 
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // App branding
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4FC3F7).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.videocam_rounded,
-                color: Color(0xFF4FC3F7), size: 52),
-          ),
-          const SizedBox(height: 18),
-          const Text('DashCam Player',
-              style: TextStyle(color: Colors.white, fontSize: 22,
-                  fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-          const SizedBox(height: 6),
-          const Text('Dual-camera dashcam video player & exporter',
-              style: TextStyle(color: Colors.white38, fontSize: 13)),
-          const SizedBox(height: 28),
+    // Converging perspective lines (road vanishing point effect)
+    final cx = size.width / 2;
+    final vanishY = size.height * 0.35;
 
-          // Open button
-          ElevatedButton.icon(
-            onPressed: onOpen,
-            icon: const Icon(Icons.folder_open_rounded, size: 20),
-            label: const Text('Open Dashcam Folder',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF4FC3F7),
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text('Supports video_front / video_back folder structure',
-              style: TextStyle(color: Colors.white24, fontSize: 11)),
+    paint.color = const Color(0x06FFFFFF);
+    for (var i = 1; i <= 6; i++) {
+      final spread = i * size.width * 0.12;
+      final y = vanishY + i * size.height * 0.08;
+      canvas.drawLine(Offset(cx - spread, y), Offset(cx + spread, y), paint);
+    }
 
-          const SizedBox(height: 32),
-
-          // Shortcuts in multi-column grid
-          Container(
-            constraints: const BoxConstraints(maxWidth: 640),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-            ),
-            child: Column(children: [
-              const Text('KEYBOARD SHORTCUTS',
-                  style: TextStyle(color: Colors.white24, fontSize: 10,
-                      fontWeight: FontWeight.w600, letterSpacing: 1.5)),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Column 1: Playback
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('Playback'),
-                      _kb(sc.label(ShortcutAction.playPause), 'Play / Pause'),
-                      _kb('${sc.label(ShortcutAction.seekBackward)} ${sc.label(ShortcutAction.seekForward)}', 'Seek \u00b110s'),
-                      _kb(sc.label(ShortcutAction.nextClip), 'Next clip'),
-                      _kb(sc.label(ShortcutAction.previousClip), 'Previous clip'),
-                      _kb('${sc.label(ShortcutAction.speedDown)} / ${sc.label(ShortcutAction.speedUp)}', 'Speed down / up'),
-                      _kb(sc.label(ShortcutAction.speedReset), 'Reset speed 1x'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('Audio'),
-                      _kb(sc.label(ShortcutAction.muteFront), 'Mute front'),
-                      _kb(sc.label(ShortcutAction.muteBack), 'Mute back'),
-                    ],
-                  )),
-                  const SizedBox(width: 16),
-                  // Column 2: View & Layout
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('Layout'),
-                      _kb(sc.label(ShortcutAction.layoutSideBySide), 'Side by side'),
-                      _kb(sc.label(ShortcutAction.layoutStacked), 'Stacked'),
-                      _kb(sc.label(ShortcutAction.layoutPip), 'PIP (toggle primary)'),
-                      _kb(sc.label(ShortcutAction.layoutPopup), 'Layout popup'),
-                      _kb(sc.label(ShortcutAction.fullscreen), 'Fullscreen'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('Panels'),
-                      _kb(sc.label(ShortcutAction.clipList), 'Clip list'),
-                      _kb(sc.label(ShortcutAction.thumbnailToggle), 'List / Thumbnails'),
-                      _kb(sc.label(ShortcutAction.selectMode), 'Select mode'),
-                      _kb(sc.label(ShortcutAction.selectAll), 'Select all'),
-                      _kb(sc.label(ShortcutAction.mapSidebar), 'Map sidebar'),
-                      _kb(sc.label(ShortcutAction.about), 'About'),
-                    ],
-                  )),
-                  const SizedBox(width: 16),
-                  // Column 3: File operations
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionLabel('File'),
-                      _kb(sc.label(ShortcutAction.openFolder), 'Open folder'),
-                      _kb(sc.label(ShortcutAction.saveClips), 'Save clips'),
-                      _kb(sc.label(ShortcutAction.deleteClips), 'Delete clips'),
-                      _kb(sc.label(ShortcutAction.exportVideo), 'Export video'),
-                      _kb(sc.label(ShortcutAction.closeFolder), 'Close folder'),
-                      _kb(sc.label(ShortcutAction.toggleSort), 'Toggle sort'),
-                      const SizedBox(height: 10),
-                      _sectionLabel('App'),
-                      _kb(sc.label(ShortcutAction.quit), 'Quit'),
-                      _kb(sc.label(ShortcutAction.shortcutSettings), 'Shortcuts'),
-                      _kb('Esc', 'Close overlay'),
-                    ],
-                  )),
-                ],
-              ),
-            ]),
-          ),
-        ]),
-      ),
-    );
+    // Center dashed line (road markings)
+    paint.color = const Color(0x0AFFFFFF);
+    for (var i = 0; i < 8; i++) {
+      final y = vanishY + 20 + i * 22.0;
+      final halfW = 4.0 + i * 3.0;
+      canvas.drawLine(Offset(cx - halfW, y), Offset(cx + halfW, y), paint);
+    }
   }
 
-  static Widget _sectionLabel(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(text,
-        style: const TextStyle(color: Colors.white30, fontSize: 10,
-            fontWeight: FontWeight.w600, letterSpacing: 0.8)),
-  );
-
-  static Widget _kb(String key, String label) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: Row(children: [
-      Container(
-        constraints: const BoxConstraints(minWidth: 42),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Text(key, textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 10,
-                fontFamily: 'monospace')),
-      ),
-      const SizedBox(width: 8),
-      Expanded(child: Text(label,
-          style: const TextStyle(color: Colors.white30, fontSize: 11))),
-    ]),
-  );
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ─── Save clip dialog ────────────────────────────────────────────────────────
@@ -1414,16 +2074,21 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                 final pair = widget.pairs[i];
                 final checked = _selected.contains(i);
                 final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final isSingleVideo = pair.hasFront && !pair.hasBack && !pair.isRemote && pair.source == 'local';
                 final badge = pair.isPaired
                     ? 'F+B'
-                    : pair.hasFront
-                        ? 'F only'
-                        : 'B only';
+                    : isSingleVideo
+                        ? 'Video'
+                        : pair.hasFront
+                            ? 'F only'
+                            : 'B only';
                 final badgeColor = pair.isPaired
                     ? const Color(0xFF4FC3F7)
-                    : pair.hasFront
-                        ? Colors.orange
-                        : Colors.purple;
+                    : isSingleVideo
+                        ? Colors.teal
+                        : pair.hasFront
+                            ? Colors.orange
+                            : Colors.purple;
 
                 return CheckboxListTile(
                   value: checked,
@@ -1458,6 +2123,10 @@ class _SaveClipDialogState extends State<_SaveClipDialog> {
                       const SizedBox(width: 4),
                       const Text('locked',
                         style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                    ],
+                    if (pair.isRemote) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
                     ],
                   ]),
                   dense: true,
@@ -1589,16 +2258,21 @@ class _DeleteClipDialogState extends State<_DeleteClipDialog> {
                 final pair = widget.pairs[i];
                 final checked = _selected.contains(i);
                 final fileCount = (pair.hasFront ? 1 : 0) + (pair.hasBack ? 1 : 0);
+                final isSingleVideo = pair.hasFront && !pair.hasBack && !pair.isRemote && pair.source == 'local';
                 final badge = pair.isPaired
                     ? 'F+B'
-                    : pair.hasFront
-                        ? 'F only'
-                        : 'B only';
+                    : isSingleVideo
+                        ? 'Video'
+                        : pair.hasFront
+                            ? 'F only'
+                            : 'B only';
                 final badgeColor = pair.isPaired
                     ? const Color(0xFF4FC3F7)
-                    : pair.hasFront
-                        ? Colors.orange
-                        : Colors.purple;
+                    : isSingleVideo
+                        ? Colors.teal
+                        : pair.hasFront
+                            ? Colors.orange
+                            : Colors.purple;
 
                 return CheckboxListTile(
                   value: checked,
@@ -1633,6 +2307,10 @@ class _DeleteClipDialogState extends State<_DeleteClipDialog> {
                       const SizedBox(width: 4),
                       const Text('locked',
                         style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                    ],
+                    if (pair.isRemote) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.wifi_rounded, size: 10, color: Color(0xFF4FC3F7)),
                     ],
                   ]),
                   dense: true,

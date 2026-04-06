@@ -1,43 +1,82 @@
 // lib/models/dashcam_file.dart
+//
+// Represents a file on the Onelap dashcam SD card.
+// Parsed from GET /app/getfilelist JSON response.
 
-/// Represents a single file on the dashcam, parsed from cmd=3015 XML response.
+import '../services/dashcam_service.dart';
+
 class DashcamFile {
-  final String path;       // full path e.g. /tmp/SD0/DCIM/100MEDIA/FILE0001.MOV
-  final String name;       // filename only
-  final int size;          // bytes
-  final String timeRaw;    // raw time string from dashcam
+  /// Full path on dashcam, e.g. /mnt/card/video_front/20260329_190645_f.ts
+  final String path;
+
+  /// Filename only, e.g. 20260329_190645_f.ts
+  final String name;
+
+  /// File size in bytes.
+  final int size;
+
+  /// Unix timestamp (seconds).
+  final int createtime;
+
+  /// Human-readable time string, e.g. "20260329190645".
+  final String createtimestr;
+
+  /// Folder type: "loop" (normal), "emr" (emergency), "park" (parking/timelapse).
+  final String folder;
+
+  /// File type from API (2 = video).
+  final int type;
+
+  /// Parsed timestamp.
   final DateTime? timestamp;
 
   const DashcamFile({
     required this.path,
     required this.name,
     required this.size,
-    required this.timeRaw,
+    this.createtime = 0,
+    this.createtimestr = '',
+    this.folder = 'loop',
+    this.type = 2,
     this.timestamp,
   });
 
-  // Uses DashcamService.baseUrl for dynamic IP
-  String get downloadUrl => 'http://${_ip()}$path';
-  String get thumbnailUrl => 'http://${_ip()}/?custom=1&cmd=4002&str=$path';
-  String get deleteUrl => 'http://${_ip()}/?custom=1&cmd=4003&str=$path';
+  // ── Derived properties ────────────────────────────────────────────────
 
-  // Lazy import to avoid circular dependency
-  static String _ip() {
-    // Default; overridden at runtime by DashcamService.ip
-    return _ipOverride ?? '192.168.1.254';
-  }
-  static String? _ipOverride;
-  static void setIp(String ip) => _ipOverride = ip;
+  /// Whether this is a front camera file.
+  bool get isFront => name.contains('_f.') || path.contains('video_front');
+
+  /// Whether this is a back camera file.
+  bool get isBack => name.contains('_b.') || path.contains('video_back');
+
+  /// Whether this is a timelapse/parking file.
+  bool get isTimelapse => name.contains('_tlp_');
+
+  /// Camera label for display.
+  String get cameraLabel => isFront ? 'Front' : (isBack ? 'Back' : 'Unknown');
+
+  /// Folder label for display.
+  String get folderLabel => switch (folder) {
+        'loop' => 'Normal',
+        'emr' => 'Emergency',
+        'event' => 'Event',
+        'park' => 'Parking',
+        _ => folder,
+      };
 
   bool get isVideo {
     final lower = name.toLowerCase();
-    return lower.endsWith('.mov') || lower.endsWith('.mp4') ||
-           lower.endsWith('.avi') || lower.endsWith('.ts');
+    return lower.endsWith('.ts') ||
+        lower.endsWith('.mov') ||
+        lower.endsWith('.mp4') ||
+        lower.endsWith('.avi');
   }
 
   bool get isPhoto {
     final lower = name.toLowerCase();
-    return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png');
+    return lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.png');
   }
 
   String get displaySize {
@@ -49,104 +88,56 @@ class DashcamFile {
     return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  /// Parse the file list XML from cmd=3015 into a list of DashcamFile objects.
-  static List<DashcamFile> parseFileListXml(String xml) {
-    final files = <DashcamFile>[];
-    final fileBlocks = RegExp(r'<File>(.*?)</File>', dotAll: true)
-        .allMatches(xml);
+  /// HTTP URL to download this file from the dashcam.
+  String get downloadUrl => '${DashcamService.baseUrl}$path';
 
-    for (final match in fileBlocks) {
-      final block = match.group(1) ?? '';
-      final path = _extractTag(block, 'FPATH') ?? _extractTag(block, 'NAME');
-      final name = _extractTag(block, 'NAME');
-      final sizeStr = _extractTag(block, 'SIZE');
-      final timeStr = _extractTag(block, 'TIME') ?? '';
-
-      if (path == null || name == null) continue;
-
-      // Extract just the filename from the full path
-      final fileName = name.contains('\\')
-          ? name.split('\\').last
-          : name.contains('/')
-              ? name.split('/').last
-              : name;
-
-      // Normalize path: convert A:\DCIM\... to /DCIM/...
-      var normalPath = path
-          .replaceAll('\\', '/')
-          .replaceAll(RegExp(r'^[A-Za-z]:'), '');
-      // Ensure leading slash
-      if (!normalPath.startsWith('/')) normalPath = '/$normalPath';
-
-      files.add(DashcamFile(
-        path: normalPath,
-        name: fileName,
-        size: int.tryParse(sizeStr ?? '0') ?? 0,
-        timeRaw: timeStr,
-        timestamp: _parseTime(timeStr),
-      ));
-    }
-
-    return files;
+  /// The matching timestamp key for pairing front/back files.
+  /// Extracts "20260329_190645" from "20260329_190645_f.ts".
+  String get pairingKey {
+    // Remove folder prefix, extension, and camera suffix
+    final base = name.replaceAll(RegExp(r'\.[^.]+$'), ''); // strip extension
+    // Remove _f, _b, _tlp_f, _tlp_b suffixes
+    return base
+        .replaceAll(RegExp(r'_tlp_[fb]$'), '')
+        .replaceAll(RegExp(r'_[fb]$'), '');
   }
 
-  static String? _extractTag(String xml, String tag) {
-    final match = RegExp('<$tag>(.*?)</$tag>', dotAll: true).firstMatch(xml);
-    return match?.group(1)?.trim();
+  // ── Factory ───────────────────────────────────────────────────────────
+
+  /// Parse from a file entry in the getfilelist JSON response.
+  factory DashcamFile.fromJson(Map<String, dynamic> json, String folder) {
+    final path = json['name'] as String? ?? '';
+    final fileName = path.contains('/')
+        ? path.split('/').last
+        : path;
+    final timeStr = json['createtimestr'] as String? ?? '';
+
+    return DashcamFile(
+      path: path,
+      name: fileName,
+      size: json['size'] as int? ?? 0,
+      createtime: json['createtime'] as int? ?? 0,
+      createtimestr: timeStr,
+      folder: folder,
+      type: json['type'] as int? ?? 2,
+      timestamp: _parseTimestamp(timeStr),
+    );
   }
 
-  static DateTime? _parseTime(String time) {
-    if (time.isEmpty) return null;
-    try {
-      // Common formats: "2024/03/15 14:30:22" or "2024-03-15 14:30:22"
-      final normalized = time.replaceAll('/', '-');
-      return DateTime.tryParse(normalized);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Parse an HTTP directory listing (HTML with <a href> links) into files.
-  static List<DashcamFile> parseDirectoryListing(String html, String basePath) {
-    final files = <DashcamFile>[];
-
-    // Match href links to media files
-    final links = RegExp(r'href="([^"]*\.(MOV|MP4|AVI|JPG|JPEG|TS|mov|mp4|avi|jpg|jpeg|ts))"',
-        caseSensitive: false)
-        .allMatches(html);
-
-    for (final m in links) {
-      final href = m.group(1) ?? '';
-      if (href.isEmpty) continue;
-
-      final fileName = href.contains('/')
-          ? href.split('/').last
-          : href;
-      final fullPath = href.startsWith('/')
-          ? href
-          : '$basePath$href';
-
-      files.add(DashcamFile(
-        path: fullPath,
-        name: fileName,
-        size: 0,
-        timeRaw: '',
-        timestamp: _parseTimestampFromFilename(fileName),
-      ));
-    }
-
-    return files;
-  }
-
-  static DateTime? _parseTimestampFromFilename(String name) {
-    // Try to extract YYYYMMDD_HHMMSS or similar from filename
-    final m = RegExp(r'(\d{4})(\d{2})(\d{2})[\-_]?(\d{2})(\d{2})(\d{2})')
-        .firstMatch(name);
+  static DateTime? _parseTimestamp(String timeStr) {
+    if (timeStr.isEmpty) return null;
+    // Format: "20260329190645" → 2026-03-29 19:06:45
+    final m = RegExp(r'(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})')
+        .firstMatch(timeStr);
     if (m == null) return null;
     try {
       return DateTime(
-        int.parse(m.group(1)!), int.parse(m.group(2)!), int.parse(m.group(3)!),
-        int.parse(m.group(4)!), int.parse(m.group(5)!), int.parse(m.group(6)!),
+        int.parse(m.group(1)!),
+        int.parse(m.group(2)!),
+        int.parse(m.group(3)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+        int.parse(m.group(6)!),
       );
     } catch (_) {
       return null;
@@ -154,5 +145,5 @@ class DashcamFile {
   }
 
   @override
-  String toString() => 'DashcamFile($name, $displaySize)';
+  String toString() => 'DashcamFile($name, $displaySize, $folder)';
 }
