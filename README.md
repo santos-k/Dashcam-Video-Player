@@ -150,6 +150,7 @@ lib/
     shortcut_service.dart            Shortcut config JSON persistence
     dashcam_service.dart             Dashcam HTTP API client (CARDV protocol)
     dashcam_tcp_service.dart         Dashcam TCP socket protocol client
+    update_service.dart              GitHub-based auto-update checker
   screens/
     player_screen.dart               Main screen with keyboard shortcuts
   widgets/
@@ -249,6 +250,7 @@ Supports Novatek CARDV-based dashcams (Onelap, Viofo, and similar).
 
 | Version | Highlights |
 |---|---|
+| 3.1.0 | Auto-update checker (GitHub releases + main branch detection), drag & drop / file picker / Open With support, live GPS tracking synced to playback, auto-sync paired videos via GPS timestamps, front/back only layout modes, zoom controls, inline map panel, redesigned playlist & clip list UI |
 | 2.0.0 | Wi-Fi dashcam connection (browse/download/delete/stream/settings), thumbnail clip browser with grid/list views, multi-select with batch delete, customizable keyboard shortcuts with persistence, PIP position fix on controls toggle, auto-scroll clip list |
 | 1.2.0 | Variable speed (0.1x-5x), redesigned landing page, auto-hide controls, save progress, toggle shortcuts, PIP primary swap, instant quit |
 | 1.1.1 | PIP bounds fix, shortcuts overhaul, export improvements, About popup |

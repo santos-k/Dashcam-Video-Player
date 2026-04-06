@@ -30,6 +30,8 @@ import '../models/dashcam_state.dart';
 import '../services/export_service.dart';
 import '../services/log_service.dart';
 import '../services/thumbnail_service.dart';
+import '../services/update_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
@@ -1700,8 +1702,40 @@ class _DashcamStatusBtn extends ConsumerWidget {
 
 // ─── About panel (in-widget overlay, not a dialog) ───────────────────────────
 
-class _AboutPanel extends StatelessWidget {
+class _AboutPanel extends StatefulWidget {
   const _AboutPanel();
+
+  @override
+  State<_AboutPanel> createState() => _AboutPanelState();
+}
+
+class _AboutPanelState extends State<_AboutPanel> {
+  UpdateInfo? _updateInfo;
+  bool _checking = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkForUpdate();
+  }
+
+  Future<void> _checkForUpdate() async {
+    setState(() { _checking = true; _error = null; });
+    try {
+      final info = await UpdateService.checkForUpdate();
+      if (mounted) setState(() { _updateInfo = info; _checking = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Could not check for updates'; _checking = false; });
+    }
+  }
+
+  void _openDownload() {
+    final url = _updateInfo?.downloadUrl ?? _updateInfo?.htmlUrl;
+    if (url != null) {
+      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1738,7 +1772,7 @@ class _AboutPanel extends StatelessWidget {
                 Text('DashCam Player',
                     style: TextStyle(color: Colors.white, fontSize: 16,
                         fontWeight: FontWeight.w700)),
-                Text('v2.1.0  \u00b7  Desktop',
+                Text('v3.1.0  \u00b7  Desktop',
                     style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 11)),
               ],
             ),
@@ -1760,6 +1794,13 @@ class _AboutPanel extends StatelessWidget {
           const _Af(Icons.keyboard_rounded, '30+ customizable keyboard shortcuts'),
           const SizedBox(height: 14),
           const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 12),
+
+          // ── Update checker section ──
+          _buildUpdateSection(),
+
+          const SizedBox(height: 10),
+          const Divider(color: Colors.white10, height: 1),
           const SizedBox(height: 10),
           const Text('Built with Flutter & media_kit',
               style: TextStyle(color: Colors.white30, fontSize: 10)),
@@ -1768,6 +1809,89 @@ class _AboutPanel extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildUpdateSection() {
+    if (_checking) {
+      return const Row(children: [
+        SizedBox(width: 14, height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2,
+              color: Color(0xFF4FC3F7))),
+        SizedBox(width: 10),
+        Text('Checking for updates...',
+            style: TextStyle(color: Colors.white54, fontSize: 12)),
+      ]);
+    }
+
+    if (_error != null) {
+      return Row(children: [
+        const Icon(Icons.cloud_off_rounded, color: Colors.white38, size: 14),
+        const SizedBox(width: 10),
+        Expanded(child: Text(_error!,
+            style: const TextStyle(color: Colors.white38, fontSize: 12))),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: _checkForUpdate,
+          child: const Text('Retry',
+              style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 12)),
+        ),
+      ]);
+    }
+
+    if (_updateInfo != null && _updateInfo!.hasUpdate) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF4FC3F7).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF4FC3F7).withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.system_update_rounded,
+                  color: Color(0xFF4FC3F7), size: 16),
+              const SizedBox(width: 8),
+              Text('v${_updateInfo!.latestVersion} available',
+                  style: const TextStyle(color: Color(0xFF4FC3F7),
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+            ]),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 30,
+              child: ElevatedButton.icon(
+                onPressed: _openDownload,
+                icon: const Icon(Icons.download_rounded, size: 14),
+                label: const Text('Download Update', style: TextStyle(fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4FC3F7),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Up to date
+    return Row(children: [
+      const Icon(Icons.check_circle_outline_rounded,
+          color: Color(0xFF66BB6A), size: 14),
+      const SizedBox(width: 10),
+      const Expanded(child: Text('You\'re on the latest version',
+          style: TextStyle(color: Colors.white54, fontSize: 12))),
+      GestureDetector(
+        onTap: _checkForUpdate,
+        child: const Icon(Icons.refresh_rounded,
+            color: Colors.white38, size: 14),
+      ),
+    ]);
   }
 }
 
